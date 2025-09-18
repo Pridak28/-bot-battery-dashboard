@@ -1,0 +1,65 @@
+battery:
+  capacity_mwh: 55.0
+  power_mw: 20.0
+  soc_initial: 0.5 # 0..1
+  round_trip_efficiency: 0.9
+risk:
+  max_position_mwh: 55.0
+  max_order_mwh: 20.0
+  min_price_eur_mwh: -100.0
+  max_price_eur_mwh: 500.0
+  credit_check_enabled: false
+  max_open_orders: 100
+execution:
+  mode: dry-run # dry-run | backtest | live
+  timezone: Europe/Bucharest
+  submit_pzu: true
+  submit_balancing: false # set true only when you have live access and logic
+markets:
+  pzu:
+    base_url: ${PZU_BASE_URL}
+    username: ${PZU_USERNAME}
+    password: ${PZU_PASSWORD}
+  balancing:
+    base_url: ${BM_BASE_URL}
+    username: ${BM_USERNAME}
+    password: ${BM_PASSWORD}
+data:
+  pzu_forecast_csv: ./data/pzu_history_3y.csv # Use 3-year historical data for proper monthly trends analysis
+  bm_forecast_csv: ./data/imbalance_history_3y.csv # Use 3-year historical data for comprehensive analysis
+  fx_ron_per_eur: 5.0
+strategy:
+  pzu:
+    daily_cycles_target: 1
+    min_spread_eur_mwh: 15.0
+    enforce_soc_end_equal_start: true
+    dst_tolerant: true
+  balancing:
+    enable: false
+    charge_threshold_delta_eur: 20.0
+    discharge_threshold_delta_eur: 20.0
+    reserve_up: 0.15
+    reserve_down: 0.15
+    max_deviation_fraction: 1.0
+fr_products:
+  FCR:
+    enabled: true
+    contracted_mw: 10.0
+    capacity_eur_per_mw_h: 7.5
+    up_threshold_eur_mwh: 0.0
+    down_threshold_eur_mwh: 0.0
+    calendar_csv: ""
+  aFRR:
+    enabled: true
+    contracted_mw: 10.0
+    capacity_eur_per_mw_h: 5.0
+    up_threshold_eur_mwh: 0.0
+    down_threshold_eur_mwh: 0.0
+    calendar_csv: ""
+  mFRR:
+    enabled: false
+    contracted_mw: 0.0
+    capacity_eur_per_mw_h: 0.0
+    up_threshold_eur_mwh: 0.0
+    down_threshold_eur_mwh: 0.0
+    calendar_csv: ""
