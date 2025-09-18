@@ -15,6 +15,8 @@ import pytz
 import yaml
 import pandas as pd
 import streamlit as st
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend to prevent React update loops
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -93,6 +95,44 @@ def format_price_per_mwh(value: float, decimals: int = 2) -> str:
         return str(value)
 
 
+def _sanitize_session_value(value):
+    """Convert values to session-safe equivalents (no NaNs, numpy scalars, or Period types)."""
+    try:
+        if isinstance(value, dict):
+            return {k: _sanitize_session_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_sanitize_session_value(v) for v in value]
+        if isinstance(value, tuple):
+            return tuple(_sanitize_session_value(v) for v in value)
+        if isinstance(value, pd.DataFrame):
+            return value.copy()
+        if isinstance(value, pd.Series):
+            return value.copy()
+        if value is pd.NaT:
+            return None
+        if isinstance(value, pd.Timestamp):
+            return value.isoformat()
+        if isinstance(value, pd.Period):
+            return str(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, np.bool_):
+            return bool(value)
+        if isinstance(value, np.integer):
+            return int(value)
+        if isinstance(value, np.floating):
+            value = float(value)
+            return None if math.isnan(value) else value
+        if isinstance(value, float):
+            return None if math.isnan(value) else value
+        return value
+    except Exception:
+        return value
+
+
+
 def enrich_cycle_stats(stats: Optional[dict], history: Optional[pd.DataFrame]) -> dict:
     """Fill in missing spread/cost metrics using the available daily history."""
     stats = dict(stats or {})
@@ -157,8 +197,18 @@ def build_cash_flow_summary(
     freq : str
         "Y" for yearly aggregation (default) or "M" for monthly aggregation.
     """
-    if history is None or history.empty:
-        return pd.DataFrame()
+    if history is None or (isinstance(history, pd.DataFrame) and history.empty):
+        return pd.DataFrame(columns=[
+            "Year" if freq.upper() == "Y" else "Month",
+            "Days",
+            "Turnover €",
+            "Cost €",
+            "Profit €",
+            "Loss €",
+            "Avg buy €/MWh",
+            "Avg sell €/MWh",
+            "Spread €/MWh",
+        ])
 
     working = history.copy()
     if "date" not in working:
@@ -248,7 +298,10 @@ def build_cash_flow_summary(
             "Avg sell €/MWh": None,
             "Spread €/MWh": None,
         }
-        df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+        total_df = pd.DataFrame([total_row])
+        # Ensure columns match before concatenation
+        total_df = total_df.reindex(columns=df.columns, fill_value=None)
+        df = pd.concat([df, total_df], ignore_index=True)
 
     label_key = "Year" if freq == "Y" else "Month"
     df[label_key] = df[label_key].astype(str)
@@ -287,6 +340,17 @@ def get_chart_colors() -> dict:
         'white': '#ffffff',         # Text overlays
         'grey_light': '#e5e5e5',    # Light gray for backgrounds
     }
+
+from contextlib import contextmanager
+
+@contextmanager
+def safe_pyplot_figure(*args, **kwargs):
+    """Context manager to ensure proper cleanup of matplotlib figures"""
+    fig, ax = plt.subplots(*args, **kwargs)
+    try:
+        yield fig, ax
+    finally:
+        plt.close(fig)
 
 def load_config(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -686,7 +750,12 @@ def load_transelectrica_imbalance_from_excel(path_or_dir: str, fx_ron_per_eur: f
     if not frames:
         return pd.DataFrame(columns=["date", "slot", "price_eur_mwh"])  # empty
 
-    out = pd.concat(frames, ignore_index=True)
+    # Filter out empty DataFrames before concatenation
+    non_empty_frames = [f for f in frames if not f.empty]
+    if not non_empty_frames:
+        return pd.DataFrame(columns=["date", "slot", "price_eur_mwh"])
+
+    out = pd.concat(non_empty_frames, ignore_index=True)
     out = out.sort_values(["date", "slot"]).drop_duplicates(["date", "slot"], keep="last")
     # Convert from RON to EUR by default
     out["price_eur_mwh"] = pd.to_numeric(out["price"], errors="coerce") / float(fx_ron_per_eur)
@@ -744,7 +813,13 @@ def load_system_imbalance_from_excel(path_or_dir: str) -> pd.DataFrame:
             continue
     if not frames:
         return pd.DataFrame(columns=["date","slot","imbalance_mw"])  # empty
-    out = pd.concat(frames, ignore_index=True)
+
+    # Filter out empty DataFrames before concatenation
+    non_empty_frames = [f for f in frames if not f.empty]
+    if not non_empty_frames:
+        return pd.DataFrame(columns=["date","slot","imbalance_mw"])
+
+    out = pd.concat(non_empty_frames, ignore_index=True)
     out = out.sort_values(["date","slot"]).drop_duplicates(["date","slot"], keep="last")
     # ensure types
     out['slot'] = out['slot'].astype(int)
@@ -1438,12 +1513,20 @@ def render_historical_market_comparison(cfg: dict, capacity_mwh: float, eta_rt: 
         st.info("Run the PZU Horizons view and recompute results to populate comparison data.")
         return
 
-    daily_history = pzu_metrics.get("daily_history")
-    if daily_history is None or daily_history.empty:
+    daily_history_raw = pzu_metrics.get("daily_history")
+    if daily_history_raw is None:
         st.info("No PZU profitability data available. Run PZU Horizons first.")
         return
 
-    daily_history = daily_history.copy()
+    if isinstance(daily_history_raw, pd.DataFrame):
+        daily_history = daily_history_raw.copy()
+    else:
+        daily_history = pd.DataFrame(daily_history_raw)
+
+    if daily_history.empty:
+        st.info("No PZU profitability data available. Run PZU Horizons first.")
+        return
+
     daily_history["date"] = pd.to_datetime(daily_history["date"], errors="coerce")
     daily_history = daily_history.dropna(subset=["date"]).sort_values("date")
     pzu_monthly = (
@@ -1523,7 +1606,7 @@ def render_historical_market_comparison(cfg: dict, capacity_mwh: float, eta_rt: 
     pzu_display["Profit €"] = pzu_display["Profit €"].apply(
         lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep)
     )
-    st.dataframe(pzu_display, use_container_width=True)
+    st.dataframe(pzu_display, width='stretch')
 
     if not fr_window.empty:
         st.subheader("FR Monthly Detail")
@@ -1544,7 +1627,7 @@ def render_historical_market_comparison(cfg: dict, capacity_mwh: float, eta_rt: 
             fr_display[col] = fr_display[col].apply(
                 lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep)
             )
-        st.dataframe(fr_display, use_container_width=True)
+        st.dataframe(fr_display, width='stretch')
 
         annual_info = fr_metrics.get("annual") if isinstance(fr_metrics, dict) else None
         three_year_info = fr_metrics.get("three_year") if isinstance(fr_metrics, dict) else None
@@ -1599,9 +1682,22 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
     data_cfg = cfg.get('data', {}) if cfg else {}
     cfg_fx = float(data_cfg.get('fx_ron_per_eur', 5.0))
 
-    default_export8 = "export-8.xlsx" if Path("export-8.xlsx").exists() else (
-        "downloads/transelectrica_imbalance/export-8.xlsx" if Path("downloads/transelectrica_imbalance/export-8.xlsx").exists() else (
-            _find_in_data_dir([r"export-8\\.xlsx", r"export_8\\.xlsx", r"estimated.*price.*xlsx", r"price.*imbalance.*xlsx"]) or ""
+    sample_export8 = project_root / "data" / "export-8-sample.xlsx"
+    default_export8 = (
+        "export-8.xlsx"
+        if Path("export-8.xlsx").exists()
+        else (
+            "downloads/transelectrica_imbalance/export-8.xlsx"
+            if Path("downloads/transelectrica_imbalance/export-8.xlsx").exists()
+            else (str(sample_export8) if sample_export8.exists() else (
+                _find_in_data_dir([
+                    r"export-8\\.xlsx",
+                    r"export_8\\.xlsx",
+                    r"estimated.*price.*xlsx",
+                    r"price.*imbalance.*xlsx",
+                ])
+                or ""
+            ))
         )
     )
     colx1, colx2 = st.columns([2, 1])
@@ -1865,28 +1961,39 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                             st.table(outlook_table)
 
                             try:
-                                st.session_state["fr_market_metrics"] = {
-                                    "months": months_comb,
-                                    "annual": {
-                                        "capacity": annual_cap,
-                                        "activation": annual_act,
-                                        "total": annual_total,
-                                        "energy": annual_energy,
-                                        "energy_cost": annual_energy_cost,
-                                        "debt": annual_debt_service,
-                                        "net": annual_net,
-                                        "source_months": months_used,
-                                        "cost_rate": (annual_energy_cost / annual_energy) if annual_energy > 0 else 0.0,
-                                    },
-                                    "three_year": {
-                                        "capacity": three_year_cap,
-                                        "activation": three_year_act,
-                                        "total": three_year_total,
-                                        "energy_cost": three_year_energy_cost,
-                                        "debt": three_year_debt,
-                                        "net": three_year_net,
-                                    },
+                                months_payload = [
+                                    _sanitize_session_value(dict(rec)) for rec in months_comb
+                                ]
+                                annual_payload = _sanitize_session_value(
+                                    {
+                                        "capacity": float(annual_cap),
+                                        "activation": float(annual_act),
+                                        "total": float(annual_total),
+                                        "energy": float(annual_energy),
+                                        "energy_cost": float(annual_energy_cost),
+                                        "debt": float(annual_debt_service),
+                                        "net": float(annual_net),
+                                        "source_months": int(months_used),
+                                        "cost_rate": (float(annual_energy_cost) / float(annual_energy)) if annual_energy > 0 else 0.0,
+                                    }
+                                )
+                                three_year_payload = _sanitize_session_value(
+                                    {
+                                        "capacity": float(three_year_cap),
+                                        "activation": float(three_year_act),
+                                        "total": float(three_year_total),
+                                        "energy_cost": float(three_year_energy_cost),
+                                        "debt": float(three_year_debt),
+                                        "net": float(three_year_net),
+                                    }
+                                )
+                                new_fr_metrics = {
+                                    "months": months_payload,
+                                    "annual": annual_payload,
+                                    "three_year": three_year_payload,
                                 }
+                                if st.session_state.get("fr_market_metrics") != new_fr_metrics:
+                                    st.session_state["fr_market_metrics"] = new_fr_metrics
                             except Exception:
                                 pass
 
@@ -1917,7 +2024,7 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                             if monthly_rows:
                                 monthly_df = pd.DataFrame(monthly_rows)
                                 st.subheader("FR Monthly Cash Flow (all months)")
-                                st.dataframe(monthly_df, use_container_width=True)
+                                st.dataframe(monthly_df, width='stretch')
                 else:
                     st.session_state.pop("fr_market_metrics", None)
 
@@ -2244,194 +2351,292 @@ if run_btn:
             st.caption(
                 "This summary finds the single 2-hour charge and discharge block that performs best over the selected window using the current capacity and power."
             )
+            
             buy_hour = fixed_cycle.get("buy_start_hour")
             sell_hour = fixed_cycle.get("sell_start_hour")
             if buy_hour is None or sell_hour is None:
                 st.info("Not enough consistent history to determine a fixed 2h schedule.")
             else:
-                buy_end = min(int(buy_hour) + 2, 24)
-                sell_end = min(int(sell_hour) + 2, 24)
-                schedule_df = pd.DataFrame(
-                    [
-                        ("Charge window", f"{int(buy_hour):02d}:00–{buy_end:02d}:00"),
-                        ("Discharge window", f"{int(sell_hour):02d}:00–{sell_end:02d}:00"),
-                        ("Charge energy", f"{fixed_cycle['charge_energy_mwh']:.1f} MWh"),
-                        ("Discharge energy", f"{fixed_cycle['discharge_energy_mwh']:.1f} MWh"),
-                    ],
-                    columns=["Metric", "Value"],
-                )
-                st.table(schedule_df)
+                # ===== SCHEDULE OVERVIEW CONTAINER =====
+                with st.container():
+                    st.markdown("#### 📅 Optimal Schedule")
+                    buy_end = min(int(buy_hour) + 2, 24)
+                    sell_end = min(int(sell_hour) + 2, 24)
+                    
+                    schedule_cols = st.columns(4)
+                    with schedule_cols[0]:
+                        st.metric(
+                            "⚡ Charge Window",
+                            f"{int(buy_hour):02d}:00–{buy_end:02d}:00",
+                            help="Optimal 2-hour charging period"
+                        )
+                    with schedule_cols[1]:
+                        st.metric(
+                            "🔋 Discharge Window", 
+                            f"{int(sell_hour):02d}:00–{sell_end:02d}:00",
+                            help="Optimal 2-hour discharging period"
+                        )
+                    with schedule_cols[2]:
+                        st.metric(
+                            "📥 Charge Energy",
+                            f"{fixed_cycle['charge_energy_mwh']:.1f} MWh",
+                            help="Energy absorbed during charging"
+                        )
+                    with schedule_cols[3]:
+                        st.metric(
+                            "📤 Discharge Energy",
+                            f"{fixed_cycle['discharge_energy_mwh']:.1f} MWh",
+                            help="Energy delivered during discharging"
+                        )
 
-                stats = enrich_cycle_stats(fixed_cycle.get("stats", {}), fixed_history)
-                price_decimals = max(currency_decimals, 2)
+                # ===== FINANCIAL PERFORMANCE CONTAINER =====
+                with st.container():
+                    st.markdown("#### 💰 Financial Performance")
+                    stats = enrich_cycle_stats(fixed_cycle.get("stats", {}), fixed_history)
+                    price_decimals = max(currency_decimals, 2)
 
-                try:
-                    st.session_state["pzu_market_metrics"] = {
-                        "history_start": history_start,
-                        "history_end": history_end,
-                        "stats": stats,
-                        "daily_history": fixed_history[
+                    # Save metrics for session state
+                    try:
+                        daily_history_subset = fixed_history[
                             [
                                 "date",
                                 "daily_profit_eur",
                                 "daily_revenue_eur",
                                 "daily_cost_eur",
                             ]
-                        ].copy(),
-                    }
-                except Exception:
-                    pass
+                        ].copy()
+                        history_start_val = _sanitize_session_value(history_start)
+                        history_end_val = _sanitize_session_value(history_end)
+                        stats_clean = _sanitize_session_value(stats)
+                        daily_history_records = _sanitize_session_value(
+                            daily_history_subset.to_dict(orient="records")
+                        )
+                        new_pzu_metrics = {
+                            "history_start": history_start_val,
+                            "history_end": history_end_val,
+                            "stats": stats_clean,
+                            "daily_history": daily_history_records,
+                        }
+                        if st.session_state.get("pzu_market_metrics") != new_pzu_metrics:
+                            st.session_state["pzu_market_metrics"] = new_pzu_metrics
+                    except Exception:
+                        pass
 
-                stats_df = pd.DataFrame(
-                    [
-                        ("Total profit", format_currency(stats.get("total_profit_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep)),
-                        ("Average day", format_currency(stats.get("average_profit_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep)),
-                        ("Total revenue", format_currency(stats.get("total_revenue_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep)),
-                        ("Total cost", format_currency(stats.get("total_cost_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep)),
-                    ],
-                    columns=["Metric", "Value"],
-                )
-                st.table(stats_df)
+                    # Main financial metrics
+                    fin_cols = st.columns(4)
+                    with fin_cols[0]:
+                        st.metric(
+                            "💵 Total Profit",
+                            format_currency(stats.get("total_profit_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep),
+                            help="Total profit over the analysis period"
+                        )
+                    with fin_cols[1]:
+                        st.metric(
+                            "📊 Average Daily",
+                            format_currency(stats.get("average_profit_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep),
+                            help="Average daily profit"
+                        )
+                    with fin_cols[2]:
+                        st.metric(
+                            "📈 Total Revenue",
+                            format_currency(stats.get("total_revenue_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep),
+                            help="Total revenue from energy sales"
+                        )
+                    with fin_cols[3]:
+                        st.metric(
+                            "📉 Total Cost",
+                            format_currency(stats.get("total_cost_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep),
+                            help="Total cost of energy purchases"
+                        )
 
-                price_df = pd.DataFrame(
-                    [
-                        ("Avg sell price", format_price_per_mwh(stats.get("avg_sell_price_eur_mwh"), decimals=price_decimals)),
-                        ("Avg buy price", format_price_per_mwh(stats.get("avg_buy_price_eur_mwh"), decimals=price_decimals)),
-                        ("Spread €/MWh", format_price_per_mwh(stats.get("spread_eur_mwh"), decimals=price_decimals)),
-                    ],
-                    columns=["Metric", "Value"],
-                )
-                st.table(price_df)
+                # ===== PRICE ANALYSIS CONTAINER =====
+                with st.container():
+                    st.markdown("#### 📊 Price Analysis")
+                    price_cols = st.columns(3)
+                    with price_cols[0]:
+                        st.metric(
+                            "💰 Avg Sell Price",
+                            format_price_per_mwh(stats.get("avg_sell_price_eur_mwh"), decimals=price_decimals),
+                            help="Average price received when selling energy"
+                        )
+                    with price_cols[1]:
+                        st.metric(
+                            "💸 Avg Buy Price",
+                            format_price_per_mwh(stats.get("avg_buy_price_eur_mwh"), decimals=price_decimals),
+                            help="Average price paid when buying energy"
+                        )
+                    with price_cols[2]:
+                        spread_value = stats.get("spread_eur_mwh")
+                        delta_color = "normal"
+                        if spread_value and spread_value > 0:
+                            delta_color = "normal"
+                        st.metric(
+                            "📈 Spread",
+                            format_price_per_mwh(spread_value, decimals=price_decimals),
+                            help="Profit margin per MWh (sell price - buy price)"
+                        )
 
-                total_days = stats.get("total_days", 0)
-                pos_days = stats.get("positive_days", 0)
-                neg_days = stats.get("negative_days", 0)
-                day_df = pd.DataFrame(
-                    [
-                        ("Winning days", f"{pos_days}/{total_days}"),
-                        ("Losing days", f"{neg_days}/{total_days}"),
-                        (
-                            "Loss on losing days",
+                # ===== TRADING STATISTICS CONTAINER =====
+                with st.container():
+                    st.markdown("#### 📈 Trading Statistics")
+                    total_days = stats.get("total_days", 0)
+                    pos_days = stats.get("positive_days", 0)
+                    neg_days = stats.get("negative_days", 0)
+                    win_rate = (pos_days / total_days * 100) if total_days > 0 else 0
+                    
+                    stats_cols = st.columns(4)
+                    with stats_cols[0]:
+                        st.metric(
+                            "✅ Winning Days",
+                            f"{pos_days}/{total_days}",
+                            delta=f"{win_rate:.1f}%",
+                            help="Days with positive profit"
+                        )
+                    with stats_cols[1]:
+                        st.metric(
+                            "❌ Losing Days",
+                            f"{neg_days}/{total_days}",
+                            delta=f"{(100-win_rate):.1f}%",
+                            delta_color="inverse",
+                            help="Days with negative profit"
+                        )
+                    with stats_cols[2]:
+                        st.metric(
+                            "💔 Total Losses",
                             format_currency(stats.get("total_loss_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep),
-                        ),
-                    ],
-                    columns=["Metric", "Value"],
-                )
-                st.table(day_df)
+                            help="Total losses on losing days"
+                        )
+                    with stats_cols[3]:
+                        efficiency_note = f"{eta_rt:.0%}"
+                        st.metric(
+                            "⚡ Round-trip Eff.",
+                            efficiency_note,
+                            help="Battery round-trip efficiency used in calculations"
+                        )
 
-                st.caption(
-                    f"Discharge energy = charge energy × efficiency → {fixed_cycle['charge_energy_mwh']:.1f} MWh × {eta_rt:.2f} = {fixed_cycle['discharge_energy_mwh']:.1f} MWh."
-                )
+                    st.caption(
+                        f"💡 Discharge energy = charge energy × efficiency → {fixed_cycle['charge_energy_mwh']:.1f} MWh × {eta_rt:.2f} = {fixed_cycle['discharge_energy_mwh']:.1f} MWh"
+                    )
 
+                # ===== PROFITABILITY WINDOWS CONTAINER =====
                 if fixed_summaries:
-                    fixed_table = []
-                    for summary in fixed_summaries:
-                        fixed_table.append(
-                            {
-                                "Period": summary["period_label"],
-                                "Days": summary["recent_days"],
-                                "Coverage %": summary["coverage_ratio"] * 100 if summary["coverage_ratio"] is not None else None,
-                                "Recent total €": summary["recent_total_eur"],
-                                "Avg daily €": summary["recent_avg_eur"],
-                                "Recent revenue €": summary.get("recent_revenue_eur"),
-                                "Recent cost €": summary.get("recent_cost_eur"),
-                                "Loss €": summary.get("recent_loss_eur"),
-                                "Projected total €": summary.get("projected_total_eur"),
-                                "Projected revenue €": summary.get("projected_revenue_eur"),
-                                "Projected cost €": summary.get("projected_cost_eur"),
-                                "Projected loss €": summary.get("projected_loss_eur"),
-                                "Spread €/MWh": summary.get("recent_spread_eur_mwh"),
-                                "Win rate %": summary["recent_success_rate"],
-                            }
-                        )
+                    with st.container():
+                        st.markdown("#### 📅 Profitability Windows")
+                        st.caption("Historical performance analysis across different time horizons")
+                        
+                        fixed_table = []
+                        for summary in fixed_summaries:
+                            fixed_table.append(
+                                {
+                                    "Period": summary["period_label"],
+                                    "Days": summary["recent_days"],
+                                    "Coverage %": summary["coverage_ratio"] * 100 if summary["coverage_ratio"] is not None else None,
+                                    "Recent total €": summary["recent_total_eur"],
+                                    "Avg daily €": summary["recent_avg_eur"],
+                                    "Recent revenue €": summary.get("recent_revenue_eur"),
+                                    "Recent cost €": summary.get("recent_cost_eur"),
+                                    "Loss €": summary.get("recent_loss_eur"),
+                                    "Projected total €": summary.get("projected_total_eur"),
+                                    "Projected revenue €": summary.get("projected_revenue_eur"),
+                                    "Projected cost €": summary.get("projected_cost_eur"),
+                                    "Projected loss €": summary.get("projected_loss_eur"),
+                                    "Spread €/MWh": summary.get("recent_spread_eur_mwh"),
+                                    "Win rate %": summary["recent_success_rate"],
+                                }
+                            )
 
-                    fixed_df = pd.DataFrame(fixed_table)
-                    preferred_order = [
-                        "Period",
-                        "Days",
-                        "Coverage %",
-                        "Recent total €",
-                        "Recent revenue €",
-                        "Recent cost €",
-                        "Loss €",
-                        "Projected total €",
-                        "Projected revenue €",
-                        "Projected cost €",
-                        "Projected loss €",
-                        "Avg daily €",
-                        "Spread €/MWh",
-                        "Win rate %",
-                    ]
-                    existing_order = [c for c in preferred_order if c in fixed_df.columns]
-                    remaining_cols = [c for c in fixed_df.columns if c not in existing_order]
-                    fixed_df = fixed_df[existing_order + remaining_cols]
-                    if show_raw_tables:
-                        st.dataframe(fixed_df, use_container_width=True)
-                    else:
-                        display_fixed = fixed_df.copy()
-                        display_fixed["Coverage %"] = display_fixed["Coverage %"].apply(
-                            lambda v: format_percent(v, decimals=percent_decimals) if v is not None else "—"
-                        )
-                        display_fixed["Recent total €"] = display_fixed["Recent total €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        display_fixed["Avg daily €"] = display_fixed["Avg daily €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        display_fixed["Recent revenue €"] = display_fixed["Recent revenue €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        display_fixed["Recent cost €"] = display_fixed["Recent cost €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        display_fixed["Loss €"] = display_fixed["Loss €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        display_fixed["Projected total €"] = display_fixed["Projected total €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        display_fixed["Projected revenue €"] = display_fixed["Projected revenue €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        display_fixed["Projected cost €"] = display_fixed["Projected cost €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        display_fixed["Projected loss €"] = display_fixed["Projected loss €"].apply(
-                            lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
-                        )
-                        spread_decimals = max(currency_decimals, 2)
-                        display_fixed["Spread €/MWh"] = display_fixed["Spread €/MWh"].apply(
-                            lambda v: format_price_per_mwh(v, decimals=spread_decimals) if v is not None else "—"
-                        )
-                        display_fixed["Win rate %"] = display_fixed["Win rate %"].apply(
-                            lambda v: format_percent(v, decimals=percent_decimals) if v is not None else "—"
-                        )
-                        st.dataframe(display_fixed, use_container_width=True)
+                        fixed_df = pd.DataFrame(fixed_table)
+                        preferred_order = [
+                            "Period",
+                            "Days",
+                            "Coverage %",
+                            "Recent total €",
+                            "Recent revenue €",
+                            "Recent cost €",
+                            "Loss €",
+                            "Projected total €",
+                            "Projected revenue €",
+                            "Projected cost €",
+                            "Projected loss €",
+                            "Avg daily €",
+                            "Spread €/MWh",
+                            "Win rate %",
+                        ]
+                        existing_order = [c for c in preferred_order if c in fixed_df.columns]
+                        remaining_cols = [c for c in fixed_df.columns if c not in existing_order]
+                        fixed_df = fixed_df[existing_order + remaining_cols]
+                        
+                        if show_raw_tables:
+                            st.dataframe(fixed_df, width='stretch')
+                        else:
+                            display_fixed = fixed_df.copy()
+                            display_fixed["Coverage %"] = display_fixed["Coverage %"].apply(
+                                lambda v: format_percent(v, decimals=percent_decimals) if v is not None else "—"
+                            )
+                            display_fixed["Recent total €"] = display_fixed["Recent total €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            display_fixed["Avg daily €"] = display_fixed["Avg daily €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            display_fixed["Recent revenue €"] = display_fixed["Recent revenue €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            display_fixed["Recent cost €"] = display_fixed["Recent cost €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            display_fixed["Loss €"] = display_fixed["Loss €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            display_fixed["Projected total €"] = display_fixed["Projected total €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            display_fixed["Projected revenue €"] = display_fixed["Projected revenue €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            display_fixed["Projected cost €"] = display_fixed["Projected cost €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            display_fixed["Projected loss €"] = display_fixed["Projected loss €"].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep) if v is not None else "—"
+                            )
+                            spread_decimals = max(currency_decimals, 2)
+                            display_fixed["Spread €/MWh"] = display_fixed["Spread €/MWh"].apply(
+                                lambda v: format_price_per_mwh(v, decimals=spread_decimals) if v is not None else "—"
+                            )
+                            display_fixed["Win rate %"] = display_fixed["Win rate %"].apply(
+                                lambda v: format_percent(v, decimals=percent_decimals) if v is not None else "—"
+                            )
+                            st.dataframe(display_fixed, width='stretch')
 
+                # ===== HISTORICAL CASH FLOW CONTAINER =====
                 cash_flow_historical = build_cash_flow_summary(fixed_history)
                 if not cash_flow_historical.empty:
-                    st.subheader("3-Year Cash Flow (historical)")
-                    hist_display = cash_flow_historical.copy()
-                    hist_currency_cols = ["Turnover €", "Cost €", "Profit €", "Loss €"]
-                    for col in hist_currency_cols:
-                        if col in hist_display.columns:
-                            hist_display[col] = hist_display[col].apply(
-                                lambda v, d=currency_decimals: format_currency(
-                                    v, decimals=d, thousands=thousands_sep
+                    with st.container():
+                        st.markdown("#### 💸 3-Year Cash Flow (historical)")
+                        st.caption("Annual cash flow breakdown based on historical performance")
+                        
+                        hist_display = cash_flow_historical.copy()
+                        hist_currency_cols = ["Turnover €", "Cost €", "Profit €", "Loss €"]
+                        for col in hist_currency_cols:
+                            if col in hist_display.columns:
+                                hist_display[col] = hist_display[col].apply(
+                                    lambda v, d=currency_decimals: format_currency(
+                                        v, decimals=d, thousands=thousands_sep
+                                    )
+                                    if v is not None
+                                    else "—"
                                 )
-                                if v is not None
-                                else "—"
-                            )
-                    hist_price_cols = ["Avg buy €/MWh", "Avg sell €/MWh", "Spread €/MWh"]
-                    hist_price_decimals = max(currency_decimals, 2)
-                    for col in hist_price_cols:
-                        if col in hist_display.columns:
-                            hist_display[col] = hist_display[col].apply(
-                                lambda v, d=hist_price_decimals: format_price_per_mwh(v, decimals=d)
-                                if v is not None
-                                else "—"
-                            )
-                    st.dataframe(hist_display, use_container_width=True)
+                        hist_price_cols = ["Avg buy €/MWh", "Avg sell €/MWh", "Spread €/MWh"]
+                        hist_price_decimals = max(currency_decimals, 2)
+                        for col in hist_price_cols:
+                            if col in hist_display.columns:
+                                hist_display[col] = hist_display[col].apply(
+                                    lambda v, d=hist_price_decimals: format_price_per_mwh(v, decimals=d)
+                                    if v is not None
+                                    else "—"
+                                )
+                        st.dataframe(hist_display, width='stretch')
 
         st.subheader("Custom Fixed 2h Scenario")
         st.caption("Adjust capacity, power and date range to evaluate a separate fixed 2‑hour schedule without altering the main view above.")
@@ -2601,7 +2806,7 @@ if run_btn:
                 remaining_cols = [c for c in sc_df.columns if c not in existing_order]
                 sc_df = sc_df[existing_order + remaining_cols]
                 if show_raw_tables:
-                    st.dataframe(sc_df, use_container_width=True)
+                    st.dataframe(sc_df, width='stretch')
                 else:
                     sc_display = sc_df.copy()
                     sc_display["Coverage %"] = sc_display["Coverage %"].apply(
@@ -2641,7 +2846,7 @@ if run_btn:
                     sc_display["Win rate %"] = sc_display["Win rate %"].apply(
                         lambda v: format_percent(v, decimals=percent_decimals) if v is not None else "—"
                     )
-                    st.dataframe(sc_display, use_container_width=True)
+                    st.dataframe(sc_display, width='stretch')
 
             three_year_summary = next(
                 (row for row in scenario_summary if row.get("period_label") == "3 years"),
@@ -2763,7 +2968,7 @@ if run_btn:
                             if v is not None
                             else "—"
                         )
-                st.dataframe(scen_display, use_container_width=True)
+                st.dataframe(scen_display, width='stretch')
 
         # Year-by-year best fixed hours summary (PZU only)
         best_years_df = compute_best_hours_by_year(
@@ -2814,7 +3019,7 @@ if run_btn:
                 "Spread €/MWh",
             ]
             year_df = year_df[[col for col in preferred_order if col in year_df.columns]]
-            st.dataframe(year_df, use_container_width=True)
+            st.dataframe(year_df, width='stretch')
 
     if view == "ROI & Trends":
         if daily_history.empty:
@@ -2838,14 +3043,15 @@ if run_btn:
                     monthly_data = monthly_trends['monthly_data']
                     months = [m['month'] for m in monthly_data]
                     profits = [m['total_monthly_profit'] for m in monthly_data]
-                    fig_monthly, ax_monthly = plt.subplots(figsize=(12, 6))
-                    chart_colors = get_chart_colors()
-                    ax_monthly.bar(range(len(months)), profits, alpha=0.7, color=chart_colors['darkgreen'])
-                    ax_monthly.set_xlabel('Month'); ax_monthly.set_ylabel('Monthly Profit (EUR)')
-                    ax_monthly.set_title(f"Historical Monthly Profitability ({monthly_trends.get('data_period', 'historical range')})")
-                    ax_monthly.set_xticks(range(len(months))); ax_monthly.set_xticklabels(months, rotation=45)
-                    ax_monthly.grid(True, alpha=0.3); ax_monthly.axhline(y=0, color=chart_colors['red'], linestyle='-', alpha=0.5)
-                    plt.tight_layout(); st.pyplot(fig_monthly, clear_figure=True)
+                    with safe_pyplot_figure(figsize=(12, 6)) as (fig_monthly, ax_monthly):
+                        chart_colors = get_chart_colors()
+                        ax_monthly.bar(range(len(months)), profits, alpha=0.7, color=chart_colors['darkgreen'])
+                        ax_monthly.set_xlabel('Month'); ax_monthly.set_ylabel('Monthly Profit (EUR)')
+                        ax_monthly.set_title(f"Historical Monthly Profitability ({monthly_trends.get('data_period', 'historical range')})")
+                        ax_monthly.set_xticks(range(len(months))); ax_monthly.set_xticklabels(months, rotation=45)
+                        ax_monthly.grid(True, alpha=0.3); ax_monthly.axhline(y=0, color=chart_colors['red'], linestyle='-', alpha=0.5)
+                        plt.tight_layout()
+                        st.pyplot(fig_monthly, clear_figure=True)
 
             st.subheader("💡 Historical ROI (from 2023)")
             roi_window = st.radio("ROI window (months)", options=[12, 24], index=0, horizontal=True)
@@ -3013,13 +3219,13 @@ if run_btn:
                 if bm_df.empty:
                     st.info("No balancing price points to plot for the selected date.")
                 else:
-                    fig_bm, ax_bm = plt.subplots(figsize=(10, 3))
-                    chart_colors = get_chart_colors()
-                    ax_bm.plot(bm_df["slot"], bm_df["price_ron_mwh"], color=chart_colors['primary'])
-                    ax_bm.set_xlabel("Slot (15-min)")
-                    ax_bm.set_ylabel("Price (RON/MWh)")
-                    ax_bm.grid(True, alpha=0.3)
-                    st.pyplot(fig_bm, clear_figure=True)
+                    with safe_pyplot_figure(figsize=(10, 3)) as (fig_bm, ax_bm):
+                        chart_colors = get_chart_colors()
+                        ax_bm.plot(bm_df["slot"], bm_df["price_ron_mwh"], color=chart_colors['primary'])
+                        ax_bm.set_xlabel("Slot (15-min)")
+                        ax_bm.set_ylabel("Price (RON/MWh)")
+                        ax_bm.grid(True, alpha=0.3)
+                        st.pyplot(fig_bm, clear_figure=True)
                 
                 # Traditional stats
                 st.subheader("📊 Statistical Summary")
@@ -3095,7 +3301,7 @@ if view == "FR Energy Hedging":
                     pzu_display[col] = pzu_display[col].apply(
                         lambda v: format_price_per_mwh(v, decimals=max(currency_decimals, 2))
                     )
-                st.dataframe(pzu_display, use_container_width=True)
+                st.dataframe(pzu_display, width='stretch')
 
                 reference_price = float(
                     pzu_monthly["avg_price_eur_mwh"].astype(float).mean()
@@ -3146,7 +3352,7 @@ if view == "FR Energy Hedging":
 
             if hedging_rows:
                 hedging_df = pd.DataFrame(hedging_rows)
-                st.dataframe(hedging_df, use_container_width=True)
+                st.dataframe(hedging_df, width='stretch')
             else:
                 st.info("No FR activation rows available for the selected window.")
 
@@ -3158,3 +3364,45 @@ if view == "FR Energy Hedging":
         power_mw=power_mw,
         years=[2022, 2023, 2024, 2025],
     )
+
+    if not best_years_df.empty:
+        st.subheader("📊 Best Buy/Sell Hours Per Year (PZU)")
+        st.caption(
+            "Optimal 2-hour charge/discharge schedule computed separately for each calendar year,"
+            " with annual profit at those hours."
+        )
+
+        display_years = []
+        for _, row in best_years_df.iterrows():
+            buy = int(row["buy_hour"])
+            sell = int(row["sell_hour"])
+            buy_end = min(buy + 2, 24)
+            sell_end = min(sell + 2, 24)
+            display_years.append(
+                {
+                    "Year": str(int(row["year"])),
+                    "Charge window": f"{buy:02d}:00–{buy_end:02d}:00",
+                    "Discharge window": f"{sell:02d}:00–{sell_end:02d}:00",
+                    "Profit €": format_currency(row.get("profit_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep),
+                    "Revenue €": format_currency(row.get("revenue_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep),
+                    "Cost €": format_currency(row.get("cost_eur", 0.0), decimals=currency_decimals, thousands=thousands_sep),
+                    "Avg buy €/MWh": format_price_per_mwh(row.get("avg_buy_price_eur_mwh"), decimals=max(currency_decimals, 2)),
+                    "Avg sell €/MWh": format_price_per_mwh(row.get("avg_sell_price_eur_mwh"), decimals=max(currency_decimals, 2)),
+                    "Spread €/MWh": format_price_per_mwh(row.get("spread_eur_mwh"), decimals=max(currency_decimals, 2)),
+                }
+            )
+
+        year_df = pd.DataFrame(display_years)
+        preferred_order = [
+            "Year",
+            "Charge window",
+            "Discharge window",
+            "Profit €",
+            "Revenue €",
+            "Cost €",
+            "Avg buy €/MWh",
+            "Avg sell €/MWh",
+            "Spread €/MWh",
+        ]
+        year_df = year_df[[col for col in preferred_order if col in year_df.columns]]
+        st.dataframe(year_df, width='stretch')
