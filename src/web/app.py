@@ -19,6 +19,8 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend to prevent React update loops
 import matplotlib.pyplot as plt
 import numpy as np
+import json
+import hashlib
 
 from src.data.data_provider import DataProvider
 try:
@@ -105,9 +107,9 @@ def _sanitize_session_value(value):
         if isinstance(value, tuple):
             return tuple(_sanitize_session_value(v) for v in value)
         if isinstance(value, pd.DataFrame):
-            return value.copy()
+            return value.to_dict(orient="records")
         if isinstance(value, pd.Series):
-            return value.copy()
+            return value.to_list()
         if value is pd.NaT:
             return None
         if isinstance(value, pd.Timestamp):
@@ -130,6 +132,24 @@ def _sanitize_session_value(value):
         return value
     except Exception:
         return value
+
+
+def safe_session_state_update(key: str, new_value: dict) -> None:
+    """Update Streamlit session state without triggering rerun loops."""
+    try:
+        sanitized = _sanitize_session_value(new_value)
+        new_hash = hashlib.md5(
+            json.dumps(sanitized, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        hash_key = f"{key}_hash"
+        if (
+            st.session_state.get(hash_key) != new_hash
+            or key not in st.session_state
+        ):
+            st.session_state[key] = sanitized
+            st.session_state[hash_key] = new_hash
+    except Exception:
+        st.session_state[key] = new_value
 
 
 
@@ -298,10 +318,8 @@ def build_cash_flow_summary(
             "Avg sell €/MWh": None,
             "Spread €/MWh": None,
         }
-        total_df = pd.DataFrame([total_row])
-        # Ensure columns match before concatenation
-        total_df = total_df.reindex(columns=df.columns, fill_value=None)
-        df = pd.concat([df, total_df], ignore_index=True)
+        total_values = {col: total_row.get(col, None) for col in df.columns}
+        df.loc[len(df)] = total_values
 
     label_key = "Year" if freq == "Y" else "Month"
     df[label_key] = df[label_key].astype(str)
@@ -1870,17 +1888,17 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                     if show_raw_tables:
                         st.dataframe(comb_df, width='stretch')
                     else:
-                        st.dataframe(
-                            styled_table(
-                                comb_df,
-                                currency_cols=currency_cols,
-                                float_cols=float_cols,
-                                currency_decimals=currency_decimals,
-                                float_decimals=float_decimals,
-                                thousands=thousands_sep,
-                            ),
-                            width='stretch',
-                        )
+                                st.dataframe(
+                                    styled_table(
+                                        comb_df,
+                                        currency_cols=currency_cols,
+                                        float_cols=float_cols,
+                                        currency_decimals=currency_decimals,
+                                        float_decimals=float_decimals,
+                                        thousands=thousands_sep,
+                                    ),
+                                    width='stretch',
+                                )
 
                     def sum_window(months, w):
                         sub = months[-w:]
@@ -1992,8 +2010,7 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                                     "annual": annual_payload,
                                     "three_year": three_year_payload,
                                 }
-                                if st.session_state.get("fr_market_metrics") != new_fr_metrics:
-                                    st.session_state["fr_market_metrics"] = new_fr_metrics
+                                safe_session_state_update("fr_market_metrics", new_fr_metrics)
                             except Exception:
                                 pass
 
@@ -2417,8 +2434,7 @@ if run_btn:
                             "stats": stats_clean,
                             "daily_history": daily_history_records,
                         }
-                        if st.session_state.get("pzu_market_metrics") != new_pzu_metrics:
-                            st.session_state["pzu_market_metrics"] = new_pzu_metrics
+                        safe_session_state_update("pzu_market_metrics", new_pzu_metrics)
                     except Exception:
                         pass
 
