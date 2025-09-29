@@ -785,64 +785,116 @@ def _month_key(d: pd.Timestamp) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def load_system_imbalance_from_excel(path_or_dir: str) -> pd.DataFrame:
-    """Load Estimated Power System Imbalance Excel(s) into a normalized DataFrame
-    with columns: date(str), slot(int 0..95), imbalance_mw(float, signed: +deficit, -surplus).
-    Accepts a single file or a folder tree with multiple files.
+def load_system_imbalance_from_excel(
+    path_or_dir: str,
+    target_dates: Optional[pd.DatetimeIndex] = None,
+) -> pd.DataFrame:
+    """Load Transelectrica system-imbalance data and normalize to date/slot/mW.
+
+    Parameters
+    ----------
+    path_or_dir : str
+        Excel/CSV file or directory tree containing imbalance exports.
+    target_dates : DatetimeIndex, optional
+        When provided, missing (date, slot) pairs will be forward-filled using
+        slot averages so the returned frame covers the full price window.
     """
+
     p = Path(path_or_dir)
-    frames: List[pd.DataFrame] = []
-    targets = []
+    targets: List[Path] = []
     if p.is_dir():
         targets = [*p.rglob("*.xls"), *p.rglob("*.xlsx"), *p.rglob("*.csv")]
     elif p.is_file():
         targets = [p]
     else:
-        return pd.DataFrame(columns=["date","slot","imbalance_mw"])  # empty
+        return pd.DataFrame(columns=["date", "slot", "imbalance_mw"])  # empty
+
+    frames: List[pd.DataFrame] = []
 
     for f in targets:
+        # First try to parse official Transelectrica "Estimated power system imbalance" exports
+        if f.suffix.lower() == ".xlsx":
+            try:
+                raw = pd.read_excel(f, skiprows=4)
+                lower_cols = [str(c).lower() for c in raw.columns]
+                if any("estimated system imbalance" in c for c in lower_cols):
+                    tmp = raw.copy()
+                    tmp["Time interval"] = tmp["Time interval"].astype(str)
+                    split = tmp["Time interval"].str.split(" - ", n=1, expand=True)
+                    tmp["start"] = split[0]
+                    tmp["date"] = pd.to_datetime(tmp["start"], dayfirst=True, errors="coerce")
+                    tmp = tmp.dropna(subset=["date", "ISP"])
+                    tmp["slot"] = pd.to_numeric(tmp["ISP"], errors="coerce") - 1
+                    tmp = tmp.dropna(subset=["slot"])
+                    tmp["slot"] = tmp["slot"].astype(int).clip(lower=0, upper=95)
+                    tmp["imbalance_mw"] = pd.to_numeric(
+                        tmp.get("Estimated system imbalance [MWh]"), errors="coerce"
+                    ) / 0.25
+                    frame = tmp[["date", "slot", "imbalance_mw"]].dropna(subset=["imbalance_mw"])
+                    frames.append(frame)
+                    continue
+            except Exception:
+                pass
+
         try:
             df = _imb_read_any(f)
-            if df is None or df.empty:
-                continue
-            # Try to find imbalance column by header keywords
-            cand = None
-            for c in df.columns:
-                s = str(c).lower()
-                if any(k in s for k in ["imbalance", "dezechilibru", "power system imbalance", "sistem", "desechilibru"]):
-                    cand = c
-                    break
-            if cand is None:
-                # pick last numeric column as fallback
-                num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-                if num_cols:
-                    cand = num_cols[-1]
-                else:
-                    continue
-            # Normalize time to date+slot
-            dcol, tcol, _, _ = _imb_detect_columns(df)
-            norm = _imb_normalize(df, dcol, tcol, cand, None)
-            if 'price' in norm.columns:
-                norm = norm.rename(columns={'price': 'imbalance_mw'})
-            if 'imbalance_mw' not in norm.columns:
-                norm['imbalance_mw'] = pd.to_numeric(norm[cand], errors='coerce') if cand in norm.columns else pd.NA
-            frames.append(norm[['date','slot','imbalance_mw']])
         except Exception:
             continue
+        if df is None or df.empty:
+            continue
+
+        cand = None
+        for c in df.columns:
+            s = str(c).lower()
+            if any(k in s for k in ["imbalance", "dezechilibru", "power system imbalance", "sistem", "desechilibru"]):
+                cand = c
+                break
+        if cand is None:
+            num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+            if num_cols:
+                cand = num_cols[-1]
+            else:
+                continue
+
+        dcol, tcol, _, _ = _imb_detect_columns(df)
+        norm = _imb_normalize(df, dcol, tcol, cand, None)
+        if "price" in norm.columns:
+            norm = norm.rename(columns={"price": "imbalance_mw"})
+        if "imbalance_mw" not in norm.columns:
+            if cand in norm.columns:
+                norm["imbalance_mw"] = pd.to_numeric(norm[cand], errors="coerce")
+            else:
+                continue
+        frames.append(norm[["date", "slot", "imbalance_mw"]])
+
     if not frames:
-        return pd.DataFrame(columns=["date","slot","imbalance_mw"])  # empty
+        return pd.DataFrame(columns=["date", "slot", "imbalance_mw"])  # empty
 
-    # Filter out empty DataFrames before concatenation
-    non_empty_frames = [f for f in frames if not f.empty]
-    if not non_empty_frames:
-        return pd.DataFrame(columns=["date","slot","imbalance_mw"])
+    out = pd.concat(frames, ignore_index=True)
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date"])
+    out["slot"] = pd.to_numeric(out["slot"], errors="coerce")
+    out = out.dropna(subset=["slot"])
+    out["slot"] = out["slot"].astype(int).clip(lower=0, upper=95)
+    out["imbalance_mw"] = pd.to_numeric(out["imbalance_mw"], errors="coerce")
+    out = out.dropna(subset=["imbalance_mw"])
+    out = out.sort_values(["date", "slot"]).drop_duplicates(["date", "slot"], keep="last")
 
-    out = pd.concat(non_empty_frames, ignore_index=True)
-    out = out.sort_values(["date","slot"]).drop_duplicates(["date","slot"], keep="last")
-    # ensure types
-    out['slot'] = out['slot'].astype(int)
-    out['imbalance_mw'] = pd.to_numeric(out['imbalance_mw'], errors='coerce')
-    return out.dropna(subset=['date','slot'])
+    if target_dates is not None and len(target_dates) > 0:
+        target_dates = pd.to_datetime(target_dates, errors="coerce").dropna().normalize().unique()
+        if len(target_dates) > 0:
+            base_idx = pd.MultiIndex.from_product(
+                [target_dates, range(96)], names=["date", "slot"]
+            )
+            base = pd.DataFrame(index=base_idx).reset_index()
+            base = base.merge(out, on=["date", "slot"], how="left")
+            slot_means = base.groupby("slot")["imbalance_mw"].mean()
+            base["imbalance_mw"] = base["imbalance_mw"].fillna(base["slot"].map(slot_means))
+            base["imbalance_mw"] = base["imbalance_mw"].fillna(0.0)
+            out = base
+
+    out["date"] = out["date"].dt.date.astype(str)
+    return out[["date", "slot", "imbalance_mw"]]
 
 
 def _find_in_data_dir(patterns: List[str]) -> Optional[str]:
@@ -1701,6 +1753,7 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
     cfg_fx = float(data_cfg.get('fx_ron_per_eur', 5.0))
 
     sample_export8 = project_root / "data" / "export-8-sample.xlsx"
+    sample_sysimb = project_root / "data" / "Estimated power system imbalance.xlsx"
     default_export8 = (
         "export-8.xlsx"
         if Path("export-8.xlsx").exists()
@@ -1736,7 +1789,11 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
             sysimb_candidates = _list_in_data_dir([r".*\\.xlsx$", r".*\\.xls$", r".*\\.csv$"]) or []
         selected_sysimb = st.selectbox("Detected system imbalance files", options=["(none)"] + sysimb_candidates, key='fr_sysimb_detect')
         if 'fr_sysimb_path' not in st.session_state:
-            default_sysimb = _find_in_data_dir([r"estimated.*power.*system.*imbalance", r"imbalance.*power.*system"]) or ""
+            default_sysimb = ""
+            if sample_sysimb.exists():
+                default_sysimb = str(sample_sysimb)
+            else:
+                default_sysimb = _find_in_data_dir([r"estimated.*power.*system.*imbalance", r"imbalance.*power.*system"]) or ""
             st.session_state['fr_sysimb_path'] = default_sysimb
         use_sel_sysimb = st.button("Use selected imbalance", key='fr_use_sysimb')
         if use_sel_sysimb and selected_sysimb != "(none)":
@@ -1858,7 +1915,12 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                                 st.write(f"P90: €{neg.quantile(0.9):.1f} | P95: €{neg.quantile(0.95):.1f}")
                 except Exception:
                     pass
-                sysimb_df = load_system_imbalance_from_excel(sysimb_path) if sysimb_path else pd.DataFrame()
+                price_dates = pd.to_datetime(imb_df['date'], errors='coerce').dropna().dt.normalize().unique()
+                sysimb_df = (
+                    load_system_imbalance_from_excel(sysimb_path, target_dates=price_dates)
+                    if sysimb_path
+                    else pd.DataFrame()
+                )
                 # Overlap diagnostics and fallback
                 if not sysimb_df.empty:
                     stats = _compute_overlap_stats(imb_df, sysimb_df)
