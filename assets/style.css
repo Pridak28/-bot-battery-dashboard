@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
 /* ================================
    BOT BATTERY - Clean Modern Design
@@ -26,7 +26,7 @@
   --orange: #f59e0b;
 
   /* Typography */
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
 
   /* Spacing */
   --space-1: 4px;
@@ -86,7 +86,8 @@ h1 {
   border-radius: var(--radius);
 }
 
-h2, .stMarkdown h2 {
+h2,
+.stMarkdown h2 {
   font-size: 20px;
   font-weight: 600;
   color: var(--gray-800);
@@ -98,14 +99,16 @@ h2, .stMarkdown h2 {
   border-left: 4px solid var(--blue);
 }
 
-h3, .stMarkdown h3 {
+h3,
+.stMarkdown h3 {
   font-size: 18px;
   font-weight: 600;
   color: var(--gray-700);
   margin: var(--space-6) 0 var(--space-3) 0;
 }
 
-p, .stMarkdown p {
+p,
+.stMarkdown p {
   font-size: 14px;
   color: var(--gray-600);
   line-height: 1.6;
@@ -317,17 +320,37 @@ hr {
    UTILITIES
    ================================ */
 
-.text-success { color: var(--green); }
-.text-warning { color: var(--orange); }
-.text-error { color: var(--red); }
-.text-muted { color: var(--gray-500); }
+.text-success {
+  color: var(--green);
+}
+.text-warning {
+  color: var(--orange);
+}
+.text-error {
+  color: var(--red);
+}
+.text-muted {
+  color: var(--gray-500);
+}
 
 /* Market specific colors */
-.market-pzu { border-left-color: var(--green) !important; }
-.market-fr { border-left-color: var(--orange) !important; }
-.market-balancing { border-left-color: var(--red) !important; }
+.market-pzu {
+  border-left-color: var(--green) !important;
+}
+.market-fr {
+  border-left-color: var(--orange) !important;
+}
+.market-balancing {
+  border-left-color: var(--red) !important;
+}
 
 /* Hide Streamlit branding */
-#MainMenu { visibility: hidden; }
-footer { visibility: hidden; }
-header { visibility: hidden; }
+#MainMenu {
+  visibility: hidden;
+}
+footer {
+  visibility: hidden;
+}
+header {
+  visibility: hidden;
+}
