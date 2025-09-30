@@ -738,7 +738,35 @@ def analyze_romanian_balancing_market(bm_series: pd.Series, capacity_mwh: float)
 
 
 @st.cache_data(show_spinner=False)
-def load_transelectrica_imbalance_from_excel(path_or_dir: str, fx_ron_per_eur: float = 5.0) -> pd.DataFrame:
+def _guess_currency_column(df: pd.DataFrame) -> Optional[str]:
+    """Return upper-case currency code detected in raw dataframe, if any."""
+    currency_like = [
+        "currency",
+        "moneda",
+        "cur",
+        "u.m.",
+        "unit",
+        "currency unit",
+        "currency code",
+    ]
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    for key in currency_like:
+        if key in cols:
+            series = df[cols[key]].astype(str).str.strip()
+            non_empty = series[series.str.len() > 0]
+            if non_empty.empty:
+                continue
+            top = non_empty.str.upper().value_counts().idxmax()
+            if isinstance(top, str) and len(top) <= 6:
+                return top
+    return None
+
+
+def load_transelectrica_imbalance_from_excel(
+    path_or_dir: str,
+    fx_ron_per_eur: float = 5.0,
+    declared_currency: Optional[str] = None,
+) -> pd.DataFrame:
     """Load Transelectrica estimated imbalance prices from export-8 Excel or a folder of files.
     Normalizes to a DataFrame with columns: date(str), slot(int 0..95), price_eur_mwh(float).
     """
@@ -752,6 +780,9 @@ def load_transelectrica_imbalance_from_excel(path_or_dir: str, fx_ron_per_eur: f
                     continue
                 dcol, tcol, pcol, fcol = _imb_detect_columns(df)
                 norm = _imb_normalize(df, dcol, tcol, pcol, fcol)
+                detected = _guess_currency_column(df)
+                if detected:
+                    norm["source_currency"] = detected.upper()
                 frames.append(norm)
             except Exception:
                 continue
@@ -761,6 +792,9 @@ def load_transelectrica_imbalance_from_excel(path_or_dir: str, fx_ron_per_eur: f
             return pd.DataFrame(columns=["date", "slot", "price_eur_mwh"])  # empty
         dcol, tcol, pcol, fcol = _imb_detect_columns(df)
         norm = _imb_normalize(df, dcol, tcol, pcol, fcol)
+        detected = _guess_currency_column(df)
+        if detected:
+            norm["source_currency"] = detected.upper()
         frames.append(norm)
     else:
         return pd.DataFrame(columns=["date", "slot", "price_eur_mwh"])  # empty
@@ -775,9 +809,138 @@ def load_transelectrica_imbalance_from_excel(path_or_dir: str, fx_ron_per_eur: f
 
     out = pd.concat(non_empty_frames, ignore_index=True)
     out = out.sort_values(["date", "slot"]).drop_duplicates(["date", "slot"], keep="last")
-    # Convert from RON to EUR by default
-    out["price_eur_mwh"] = pd.to_numeric(out["price"], errors="coerce") / float(fx_ron_per_eur)
-    return out[["date", "slot", "price_eur_mwh"]]
+
+    declared = (declared_currency or "").upper().strip()
+    if declared not in {"RON", "EUR", ""}:
+        declared = ""
+
+    if "source_currency" in out.columns:
+        src_cur = out["source_currency"].fillna("").astype(str).str.upper()
+    else:
+        src_cur = pd.Series([declared or "" ] * len(out))
+
+    fx = float(fx_ron_per_eur) if float(fx_ron_per_eur or 0.0) != 0 else 5.0
+    price_numeric = pd.to_numeric(out["price"], errors="coerce")
+
+    # Determine which rows still need conversion.
+    ron_aliases = {"RON", "LEI", "RON/MWH", "LEI/MWH"}
+    eur_aliases = {"EUR", "EUR/MWH"}
+
+    is_ron = src_cur.isin(ron_aliases)
+    is_eur = src_cur.isin(eur_aliases)
+
+    if not is_eur.any() and not is_ron.any():
+        # Fall back to declared currency if detection failed.
+        if declared == "EUR":
+            is_eur = pd.Series([True] * len(out))
+        elif declared == "RON":
+            is_ron = pd.Series([True] * len(out))
+
+    price_eur = price_numeric.copy()
+    if is_ron.any():
+        price_eur.loc[is_ron] = price_numeric.loc[is_ron] / fx
+    original_currency = src_cur.where(src_cur != "", declared or ("RON" if is_ron.any() and not is_eur.any() else "EUR"))
+    out["source_currency"] = original_currency
+    out["price_currency"] = "EUR"
+    out["price_eur_mwh"] = price_eur
+    return out[["date", "slot", "price_eur_mwh", "source_currency", "price_currency"]]
+
+
+@st.cache_data(show_spinner=False)
+def build_hedge_price_curve(
+    pzu_csv: Optional[str],
+    *,
+    start_date: Optional[pd.Timestamp] = None,
+    end_date: Optional[pd.Timestamp] = None,
+    fx_ron_per_eur: float = 5.0,
+) -> pd.DataFrame:
+    """Return a 15-minute hedge price curve (€/MWh) derived from PZU data.
+
+    The returned frame always has columns: date (str, YYYY-MM-DD), slot (int 0..95),
+    hedge_price_eur_mwh (float). When the PZU file is missing or malformed an empty
+    frame is returned so callers can safely merge and fall back to imbalance prices.
+    """
+
+    empty = pd.DataFrame(columns=["date", "slot", "hedge_price_eur_mwh"])
+    if not pzu_csv or not Path(pzu_csv).exists():
+        return empty
+
+    try:
+        df = pd.read_csv(pzu_csv)
+    except Exception:
+        return empty
+
+    if "date" not in df.columns or ("hour" not in df.columns and "slot" not in df.columns):
+        return empty
+    if "price" not in df.columns:
+        return empty
+
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["price"] = pd.to_numeric(df["price"], errors="coerce")
+    df = df.dropna(subset=["date", "price"])
+    if df.empty:
+        return empty
+
+    if start_date is not None:
+        try:
+            df = df[df["date"] >= pd.Timestamp(start_date)]
+        except Exception:
+            pass
+    if end_date is not None:
+        try:
+            df = df[df["date"] <= pd.Timestamp(end_date)]
+        except Exception:
+            pass
+    if df.empty:
+        return empty
+
+    price_eur = df["price"].copy()
+    if "currency" in df.columns:
+        currency = df["currency"].astype(str).str.strip().str.upper()
+        ron_mask = currency.isin(["RON", "LEI", "RON/MWH", "LEI/MWH"])
+        try:
+            fx = float(fx_ron_per_eur) if float(fx_ron_per_eur) != 0 else 5.0
+        except Exception:
+            fx = 5.0
+        price_eur = price_eur.where(~ron_mask, price_eur / fx)
+    df["hedge_price_eur_mwh"] = price_eur
+
+    if "slot" in df.columns:
+        df["slot"] = pd.to_numeric(df["slot"], errors="coerce")
+        df = df.dropna(subset=["slot"])
+        if df.empty:
+            return empty
+        df["slot"] = df["slot"].astype(int)
+        out = df[["date", "slot", "hedge_price_eur_mwh"]]
+    else:
+        df["hour"] = pd.to_numeric(df["hour"], errors="coerce")
+        df = df.dropna(subset=["hour"])
+        if df.empty:
+            return empty
+        # Ensure hour within 0..23 to create quarter-hour slots; average duplicates first.
+        df = df[(df["hour"] >= 0) & (df["hour"] <= 23)]
+        if df.empty:
+            return empty
+        df["hour"] = df["hour"].astype(int)
+        df = df.groupby(["date", "hour"], as_index=False)["hedge_price_eur_mwh"].mean()
+
+        expanded: List[pd.DataFrame] = []
+        for offset in range(4):
+            tmp = df.copy()
+            tmp["slot"] = tmp["hour"] * 4 + offset
+            expanded.append(tmp[["date", "slot", "hedge_price_eur_mwh"]])
+        if not expanded:
+            return empty
+        out = pd.concat(expanded, ignore_index=True)
+
+    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    out = out.dropna(subset=["date", "slot"])
+    if out.empty:
+        return empty
+    out["slot"] = out["slot"].astype(int).clip(lower=0, upper=95)
+    out = out.sort_values(["date", "slot"]).drop_duplicates(["date", "slot"], keep="last")
+    return out
 
 
 def _month_key(d: pd.Timestamp) -> str:
@@ -1272,16 +1435,33 @@ def simulate_frequency_regulation_revenue_multi(
                 imb_cap = mdf['imbalance_mw'].abs().fillna(0.0) * share
                 slot_act_mw = np.minimum(slot_act_mw, imb_cap)
             energy_per_slot_series = slot_act_mw * 0.25 * act_factor
-            up_rev = float((mdf.loc[up_mask, 'price_eur_mwh'] * energy_per_slot_series[up_mask]).sum())
+            price_series = mdf['price_eur_mwh']
+            up_rev = float((price_series[up_mask] * energy_per_slot_series[up_mask]).sum())
             # Per-product override for down-activation settlement sign
             prod_down_positive = pay_down_positive_map.get(prod, pay_down_as_positive) if pay_down_positive_map else pay_down_as_positive
             if prod_down_positive:
-                down_rev = float((mdf.loc[down_mask, 'price_eur_mwh'].abs() * energy_per_slot_series[down_mask]).sum())
+                down_rev = float((price_series[down_mask].abs() * energy_per_slot_series[down_mask]).sum())
             else:
-                down_rev = float((mdf.loc[down_mask, 'price_eur_mwh'] * energy_per_slot_series[down_mask]).sum())
+                down_rev = float((price_series[down_mask] * energy_per_slot_series[down_mask]).sum())
             act_rev = up_rev + down_rev
             act_energy = float(energy_per_slot_series.sum())
-            energy_cost = float((energy_per_slot_series * mdf['price_eur_mwh']).sum())
+            # Use hedge curve when available; otherwise fall back to absolute imbalance prices
+            hedge_prices = None
+            if 'hedge_price_eur_mwh' in mdf.columns:
+                try:
+                    hedge_prices = pd.to_numeric(mdf['hedge_price_eur_mwh'], errors='coerce')
+                except Exception:
+                    hedge_prices = None
+            fallback_prices = price_series.abs()
+            if hedge_prices is None:
+                hedge_prices = fallback_prices
+            else:
+                hedge_prices = hedge_prices.fillna(fallback_prices)
+
+            energy_cost = float(
+                (energy_per_slot_series[up_mask] * hedge_prices[up_mask]).sum()
+                + (energy_per_slot_series[down_mask] * hedge_prices[down_mask]).sum()
+            )
 
             row = {
                 'month': str(month),
@@ -1897,8 +2077,55 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
 
     if export8_path:
         try:
-            imb_df = load_transelectrica_imbalance_from_excel(export8_path, fx_ron_per_eur=(1.0 if excel_currency=='EUR' else fx_rate))
+            imb_df = load_transelectrica_imbalance_from_excel(
+                export8_path,
+                fx_ron_per_eur=(1.0 if excel_currency == 'EUR' else fx_rate),
+                declared_currency=excel_currency,
+            )
             if not imb_df.empty and any(v.get('enabled') and v.get('mw', 0) > 0 for v in products_cfg.values()):
+                src_cur = []
+                if 'source_currency' in imb_df.columns:
+                    src_cur = sorted({str(v) for v in imb_df['source_currency'].dropna().unique() if str(v).strip()})
+                if src_cur:
+                    if len(src_cur) == 1:
+                        cur_label = src_cur[0]
+                        st.caption(f"Detected imbalance currency: {cur_label} (internal pricing in EUR)")
+                        if excel_currency.upper() != cur_label:
+                            st.info(
+                                f"File reports {cur_label}; the '{excel_currency}' selection was overridden during import."
+                            )
+                    else:
+                        st.caption(
+                            "Detected imbalance currencies: "
+                            + ", ".join(src_cur)
+                            + " (each converted to EUR before simulation)"
+                        )
+                price_dates_ts = pd.to_datetime(imb_df['date'], errors='coerce').dropna()
+                hedge_coverage = 0.0
+                hedge_avg = None
+                if provider.pzu_csv and not price_dates_ts.empty:
+                    hedge_curve = build_hedge_price_curve(
+                        provider.pzu_csv,
+                        start_date=price_dates_ts.min(),
+                        end_date=price_dates_ts.max(),
+                        fx_ron_per_eur=fx_rate,
+                    )
+                    if not hedge_curve.empty:
+                        imb_df = imb_df.merge(hedge_curve, on=['date', 'slot'], how='left')
+                        hedge_mask = imb_df['hedge_price_eur_mwh'].notna()
+                        if hedge_mask.any():
+                            hedge_coverage = float(hedge_mask.mean())
+                            hedge_avg = float(imb_df.loc[hedge_mask, 'hedge_price_eur_mwh'].mean())
+                            st.caption(
+                                f"Energy cost reference: OPCOM PZU prices applied to {hedge_coverage*100:.1f}%"
+                                " of slots"
+                                + (f" (avg €{hedge_avg:.1f}/MWh)" if hedge_avg is not None else "")
+                            )
+                        else:
+                            st.info("PZU hedge curve has no overlapping slots for this period; falling back to imbalance prices for energy cost.")
+                    else:
+                        st.info("PZU hedge curve not available for the selected window; falling back to imbalance prices for energy cost.")
+
                 # Threshold suggestions from percentiles
                 try:
                     pos = imb_df.loc[imb_df['price_eur_mwh'] > 0, 'price_eur_mwh']
