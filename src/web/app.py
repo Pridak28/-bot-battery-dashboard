@@ -2155,6 +2155,7 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                     if stats['match_frac'] < 0.3:
                         st.warning("Low overlap between price and system imbalance (<30%). Falling back to price‑only activation.")
                         sysimb_df = pd.DataFrame()
+                has_imbalance_flag = not sysimb_df.empty
                 simm = simulate_frequency_regulation_revenue_multi(
                     imb_df,
                     products_cfg,
@@ -2202,6 +2203,7 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                         act_all = sum(m['activation_revenue_eur'] for m in months_comb)
                         tot_all = cap_all + act_all
                         energy_cost_total = float(sum(m.get('energy_cost_eur', 0.0) for m in months_comb))
+                        activation_energy_total = float(sum(m.get('activation_energy_mwh', 0.0) for m in months_comb))
                         g1, g2, g3, g4 = st.columns(4)
                         label = f"{len(months_comb)}m"
                         g1.metric(f"Capacity revenue ({label})", format_currency(cap_all, decimals=currency_decimals, thousands=thousands_sep))
@@ -2211,6 +2213,41 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                             "Energy cost (window)",
                             format_currency(energy_cost_total, decimals=currency_decimals, thousands=thousands_sep),
                         )
+                        st.caption(
+                            f"Activation energy ({label}) ≈ {activation_energy_total:.0f} MWh"
+                        )
+
+                        # Highlight when imbalance share severely limits activation volumes
+                        enabled_products = [
+                            (prod, cfg)
+                            for prod, cfg in products_cfg.items()
+                            if cfg.get('enabled') and cfg.get('mw', 0) > 0
+                        ]
+                        total_enabled_mw = sum(cfg.get('mw', 0.0) for _, cfg in enabled_products)
+                        if total_enabled_mw > 0:
+                            weighted_activation = sum(
+                                cfg.get('mw', 0.0) * act_map.get(prod, 1.0)
+                                for prod, cfg in enabled_products
+                            ) / total_enabled_mw
+                            hours_total = sum(m.get('hours_in_data', 0.0) for m in months_comb)
+                            theoretical_energy = hours_total * total_enabled_mw * weighted_activation
+                            if theoretical_energy > 0:
+                                utilisation = activation_energy_total / theoretical_energy
+                                min_share = min(
+                                    float(imbalance_share_map.get(prod, 1.0))
+                                    for prod, cfg in enabled_products
+                                ) if imbalance_share_map else 1.0
+                                if utilisation < 0.15 and has_imbalance_flag:
+                                    st.info(
+                                        "Activation volumes are only "
+                                        f"{utilisation:.1%} of the theoretical duty factor. Increase the imbalance share "
+                                        "values or remove the system-imbalance cap if you expect higher activations."
+                                    )
+                                elif min_share < 0.05 and has_imbalance_flag:
+                                    st.caption(
+                                        "Low imbalance share settings (≤5%) are throttling activation volumes; adjust the "
+                                        "'imbalance share' controls under product settings if you expected higher dispatch."
+                                    )
 
                         # Annual cash flow summary (normalized to 12 months)
                         annual_debt_service = 0.0
