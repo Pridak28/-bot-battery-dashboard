@@ -1339,7 +1339,6 @@ def simulate_frequency_regulation_revenue_multi(
     activation_factor_map: Optional[Dict[str, float]] = None,
     calendars: Optional[Dict[str, pd.DataFrame]] = None,
     system_imbalance_df: Optional[pd.DataFrame] = None,
-    imbalance_share_map: Optional[Dict[str, float]] = None,
     battery_power_mw: Optional[float] = None,
 ) -> Dict:
     """Multi-product simulation for FCR/aFRR/mFRR with separate contracted MW, capacity prices, and thresholds.
@@ -1429,11 +1428,6 @@ def simulate_frequency_regulation_revenue_multi(
             # Battery power cap during activation
             if battery_power_mw is not None:
                 slot_act_mw = np.minimum(slot_act_mw, float(battery_power_mw))
-            # Imbalance share cap
-            if has_imbalance and imbalance_share_map and ('imbalance_mw' in mdf.columns):
-                share = float(imbalance_share_map.get(prod, 1.0)) if prod in imbalance_share_map else 1.0
-                imb_cap = mdf['imbalance_mw'].abs().fillna(0.0) * share
-                slot_act_mw = np.minimum(slot_act_mw, imb_cap)
             energy_per_slot_series = slot_act_mw * 0.25 * act_factor
             price_series = mdf['price_eur_mwh']
             up_rev = float((price_series[up_mask] * energy_per_slot_series[up_mask]).sum())
@@ -1997,7 +1991,6 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
         fcr_down = st.number_input("FCR down threshold €/MWh", min_value=0.0, max_value=500.0, value=float(fcrd.get('down_threshold_eur_mwh', 0.0)), step=1.0, help="Min |price| to count down‑activation")
         fcr_down_pos = st.checkbox("FCR: down‑activation paid positive", value=True, help="Treat down regulation energy as positive revenue (|price| × energy)")
         fcr_act = st.number_input("FCR activation factor (0–1)", min_value=0.0, max_value=1.0, value=0.05, step=0.01, help="Scales activation energy to a realistic duty factor")
-        fcr_imb_share = st.number_input("FCR imbalance share (0–1)", min_value=0.0, max_value=1.0, value=0.10, step=0.01, help="Max share of system imbalance MW this product can take")
     with e2:
         afrrd = fr_cfg.get('aFRR', {})
         afrr_enabled = st.checkbox("Enable aFRR", value=bool(afrrd.get('enabled', True)))
@@ -2007,7 +2000,6 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
         afrr_down = st.number_input("aFRR down threshold €/MWh", min_value=0.0, max_value=500.0, value=float(afrrd.get('down_threshold_eur_mwh', 0.0)), step=1.0, help="Min |price| to count down‑activation")
         afrr_down_pos = st.checkbox("aFRR: down‑activation paid positive", value=True)
         afrr_act = st.number_input("aFRR activation factor (0–1)", min_value=0.0, max_value=1.0, value=0.10, step=0.01)
-        afrr_imb_share = st.number_input("aFRR imbalance share (0–1)", min_value=0.0, max_value=1.0, value=0.15, step=0.01)
     with e3:
         mfrrd = fr_cfg.get('mFRR', {})
         mfrr_enabled = st.checkbox("Enable mFRR", value=bool(mfrrd.get('enabled', False)))
@@ -2017,7 +2009,6 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
         mfrr_down = st.number_input("mFRR down threshold €/MWh", min_value=0.0, max_value=500.0, value=float(mfrrd.get('down_threshold_eur_mwh', 0.0)), step=1.0, help="Min |price| to count down‑activation")
         mfrr_down_pos = st.checkbox("mFRR: down‑activation paid positive", value=True)
         mfrr_act = st.number_input("mFRR activation factor (0–1)", min_value=0.0, max_value=1.0, value=0.10, step=0.01)
-        mfrr_imb_share = st.number_input("mFRR imbalance share (0–1)", min_value=0.0, max_value=1.0, value=0.20, step=0.01)
 
     products_cfg = {
         'FCR': {'enabled': fcr_enabled, 'mw': fcr_mw, 'cap_eur_mw_h': fcr_cap, 'up_thr': fcr_up, 'down_thr': fcr_down},
@@ -2074,6 +2065,8 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                 st.caption(f"Using extracted round-trip efficiency {extracted['round_trip_efficiency']:.2f} for activation energy scaling (informational)")
         else:
             cap_power_mw = power_mw
+
+    has_imbalance_flag = False
 
     if export8_path:
         try:
@@ -2164,7 +2157,6 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                     activation_factor_map=act_map,
                     calendars=calendars_cfg,
                     system_imbalance_df=sysimb_df,
-                    imbalance_share_map={'FCR': fcr_imb_share, 'aFRR': afrr_imb_share, 'mFRR': mfrr_imb_share},
                     battery_power_mw=cap_power_mw,
                 )
 
@@ -2217,7 +2209,7 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                             f"Activation energy ({label}) ≈ {activation_energy_total:.0f} MWh"
                         )
 
-                        # Highlight when imbalance share severely limits activation volumes
+                        # Highlight when external constraints suppress activation volumes
                         enabled_products = [
                             (prod, cfg)
                             for prod, cfg in products_cfg.items()
@@ -2233,20 +2225,11 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                             theoretical_energy = hours_total * total_enabled_mw * weighted_activation
                             if theoretical_energy > 0:
                                 utilisation = activation_energy_total / theoretical_energy
-                                min_share = min(
-                                    float(imbalance_share_map.get(prod, 1.0))
-                                    for prod, cfg in enabled_products
-                                ) if imbalance_share_map else 1.0
                                 if utilisation < 0.15 and has_imbalance_flag:
                                     st.info(
                                         "Activation volumes are only "
-                                        f"{utilisation:.1%} of the theoretical duty factor. Increase the imbalance share "
-                                        "values or remove the system-imbalance cap if you expect higher activations."
-                                    )
-                                elif min_share < 0.05 and has_imbalance_flag:
-                                    st.caption(
-                                        "Low imbalance share settings (≤5%) are throttling activation volumes; adjust the "
-                                        "'imbalance share' controls under product settings if you expected higher dispatch."
+                                        f"{utilisation:.1%} of the theoretical duty factor. Check the system imbalance data "
+                                        "or activation factors if you expect higher dispatch."
                                     )
 
                         # Annual cash flow summary (normalized to 12 months)
