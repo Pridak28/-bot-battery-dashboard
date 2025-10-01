@@ -2152,9 +2152,9 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
 
     pricing_mode_label = st.selectbox(
         "Activation pricing mode",
-        options=["Market prices (export data)", "Pay-as-bid (manual)"]
+        options=["Pay-as-bid (manual)", "Market prices (export data)"]
     )
-    activation_price_mode = "market" if pricing_mode_label == "Market prices (export data)" else "pay_as_bid"
+    activation_price_mode = "pay_as_bid" if pricing_mode_label == "Pay-as-bid (manual)" else "market"
 
     pay_as_bid_map: Dict[str, Dict[str, float]] = {}
     if activation_price_mode == "pay_as_bid":
