@@ -1478,8 +1478,9 @@ def simulate_frequency_regulation_revenue_multi(
             if battery_power_mw is not None:
                 slot_act_mw = np.minimum(slot_act_mw, float(battery_power_mw))
             if has_imbalance and 'imbalance_mw' in mdf.columns:
-                imbalance_cap = mdf['imbalance_mw'].abs().fillna(0.0)
-                slot_act_mw = np.minimum(slot_act_mw, imbalance_cap)
+                imbalance_cap = pd.to_numeric(mdf['imbalance_mw'], errors='coerce').abs()
+                capped = np.minimum(slot_act_mw, imbalance_cap)
+                slot_act_mw = slot_act_mw.where(imbalance_cap.isna(), capped)
             energy_per_slot_series = slot_act_mw * 0.25
             price_series = mdf['price_eur_mwh']
 
@@ -1890,6 +1891,33 @@ def render_historical_market_comparison(cfg: dict, capacity_mwh: float, eta_rt: 
                 fr_months_df["month_period"] = pd.to_datetime(fr_months_df["month"], errors="coerce").dt.to_period("M")
             fr_months_df = fr_months_df.dropna(subset=["month_period"]).sort_values("month_period")
             fr_months_df["month"] = fr_months_df["month_period"].astype(str)
+
+            # Fill months without activation entries using averages from observed months
+            for col in ["energy_cost_eur", "activation_revenue_eur", "activation_energy_mwh"]:
+                if col in fr_months_df.columns:
+                    fr_months_df[col] = pd.to_numeric(fr_months_df[col], errors="coerce")
+
+            cost_mask = fr_months_df.get("energy_cost_eur", pd.Series(dtype=float)).fillna(0.0) > 0.0
+            if cost_mask.any():
+                avg_cost = fr_months_df.loc[cost_mask, "energy_cost_eur"].mean()
+                fr_months_df.loc[~cost_mask, "energy_cost_eur"] = avg_cost
+
+            act_mask = fr_months_df.get("activation_revenue_eur", pd.Series(dtype=float)).fillna(0.0) > 0.0
+            if act_mask.any():
+                avg_act = fr_months_df.loc[act_mask, "activation_revenue_eur"].mean()
+                fr_months_df.loc[~act_mask, "activation_revenue_eur"] = avg_act
+
+            energy_mask = fr_months_df.get("activation_energy_mwh", pd.Series(dtype=float)).fillna(0.0) > 0.0
+            if energy_mask.any():
+                avg_energy = fr_months_df.loc[energy_mask, "activation_energy_mwh"].mean()
+                fr_months_df.loc[~energy_mask, "activation_energy_mwh"] = avg_energy
+
+            if {"capacity_revenue_eur", "activation_revenue_eur"}.issubset(fr_months_df.columns):
+                fr_months_df["total_revenue_eur"] = (
+                    fr_months_df["capacity_revenue_eur"].fillna(0.0)
+                    + fr_months_df["activation_revenue_eur"].fillna(0.0)
+                )
+
             window_fr = min(window, len(fr_months_df))
             if window_fr > 0:
                 fr_window = fr_months_df.tail(window_fr).reset_index(drop=True)
@@ -3996,6 +4024,31 @@ if view == "FR Energy Hedging":
                 fr_months_df["month_period"] = pd.to_datetime(fr_months_df["month"], errors="coerce").dt.to_period("M")
             fr_months_df = fr_months_df.dropna(subset=["month_period"]).sort_values("month_period")
             fr_months_df["month"] = fr_months_df["month_period"].astype(str)
+
+            for col in ["energy_cost_eur", "activation_revenue_eur", "activation_energy_mwh"]:
+                if col in fr_months_df.columns:
+                    fr_months_df[col] = pd.to_numeric(fr_months_df[col], errors="coerce")
+
+            cost_mask = fr_months_df.get("energy_cost_eur", pd.Series(dtype=float)).fillna(0.0) > 0.0
+            if cost_mask.any():
+                avg_cost = fr_months_df.loc[cost_mask, "energy_cost_eur"].mean()
+                fr_months_df.loc[~cost_mask, "energy_cost_eur"] = avg_cost
+
+            act_mask = fr_months_df.get("activation_revenue_eur", pd.Series(dtype=float)).fillna(0.0) > 0.0
+            if act_mask.any():
+                avg_act = fr_months_df.loc[act_mask, "activation_revenue_eur"].mean()
+                fr_months_df.loc[~act_mask, "activation_revenue_eur"] = avg_act
+
+            energy_mask = fr_months_df.get("activation_energy_mwh", pd.Series(dtype=float)).fillna(0.0) > 0.0
+            if energy_mask.any():
+                avg_energy = fr_months_df.loc[energy_mask, "activation_energy_mwh"].mean()
+                fr_months_df.loc[~energy_mask, "activation_energy_mwh"] = avg_energy
+
+            if {"capacity_revenue_eur", "activation_revenue_eur"}.issubset(fr_months_df.columns):
+                fr_months_df["total_revenue_eur"] = (
+                    fr_months_df["capacity_revenue_eur"].fillna(0.0)
+                    + fr_months_df["activation_revenue_eur"].fillna(0.0)
+                )
 
             hedging_window = st.slider(
                 "Hedging window (months)",
