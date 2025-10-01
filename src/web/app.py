@@ -2624,6 +2624,198 @@ st.title("Battery Trading Bot - Web Interface")
 apply_theme()
 st.caption("Choose a view below, set config in the sidebar, then Run Strategy.")
 
+
+def render_investment_financing_analysis(cfg: dict) -> None:
+    """Show investment, capital structure, and financing cashflow analysis."""
+
+    fr_metrics = st.session_state.get("fr_market_metrics")
+    pzu_metrics = st.session_state.get("pzu_market_metrics")
+
+    if not fr_metrics or not isinstance(fr_metrics, dict) or "annual" not in fr_metrics:
+        st.info("Run the FR Simulator first to capture annual metrics.")
+        return
+    if not pzu_metrics or not isinstance(pzu_metrics, dict) or "daily_history" not in pzu_metrics:
+        st.info("Run the PZU Horizons view to compute profitability before analysing financing.")
+        return
+
+    st.subheader("💸 Investment & Financing Analysis")
+
+    battery_cfg = cfg.get("battery", {})
+    investment_cfg = cfg.get("investment", {})
+
+    default_power = float(battery_cfg.get("power_mw", 20.0))
+    default_capex_per_mw = float(investment_cfg.get("capex_per_mw", 250_000.0))
+    default_additional_costs = float(investment_cfg.get("additional_costs", 0.0))
+    default_equity_pct = float(investment_cfg.get("equity_percent", 30.0))
+    default_interest = float(investment_cfg.get("loan_interest_percent", 6.0))
+    default_term = int(investment_cfg.get("loan_term_years", 7))
+
+    col_inputs = st.columns(3)
+    with col_inputs[0]:
+        capex_per_mw = st.number_input(
+            "Capex per MW (€/MW)",
+            min_value=0.0,
+            value=default_capex_per_mw,
+            step=50_000.0,
+            help="Capital expenditure per contracted MW of power.",
+        )
+    with col_inputs[1]:
+        project_power_mw = st.number_input(
+            "Installed power (MW)",
+            min_value=0.0,
+            value=default_power,
+            step=1.0,
+            help="Total power deployed for FR/PZU strategies.",
+        )
+    with col_inputs[2]:
+        additional_costs = st.number_input(
+            "Additional fixed costs (€)",
+            min_value=0.0,
+            value=default_additional_costs,
+            step=100_000.0,
+            help="Balance of plant, integration, or other upfront costs not captured in capex per MW.",
+        )
+
+    total_investment = capex_per_mw * project_power_mw + additional_costs
+    st.metric("Total investment", format_currency(total_investment, decimals=0))
+
+    col_fin = st.columns(3)
+    with col_fin[0]:
+        equity_pct = st.slider(
+            "Equity share (%)",
+            min_value=0,
+            max_value=100,
+            value=int(round(default_equity_pct)),
+            help="Share of the investment covered with own capital (rest assumed financed by debt).",
+        )
+    with col_fin[1]:
+        interest_rate_pct = st.number_input(
+            "Loan interest (% p.a.)",
+            min_value=0.0,
+            max_value=30.0,
+            value=default_interest,
+            step=0.1,
+        )
+    with col_fin[2]:
+        loan_term_years = st.number_input(
+            "Loan term (years)",
+            min_value=1,
+            max_value=25,
+            value=default_term,
+            step=1,
+        )
+
+    analysis_years = st.number_input(
+        "Cashflow horizon (years)",
+        min_value=loan_term_years,
+        max_value=30,
+        value=max(loan_term_years, 10),
+        step=1,
+        help="Projection length for cashflow analysis (must be ≥ loan term).",
+    )
+
+    equity_ratio = equity_pct / 100.0
+    equity_required = total_investment * equity_ratio
+    loan_principal = total_investment - equity_required
+    interest_rate = interest_rate_pct / 100.0
+
+    def _annuity_payment(principal: float, rate: float, periods: int) -> float:
+        if principal <= 0 or periods <= 0:
+            return 0.0
+        if rate <= 0:
+            return principal / periods
+        factor = (1 + rate) ** periods
+        return principal * rate * factor / (factor - 1)
+
+    annual_debt_service = _annuity_payment(loan_principal, interest_rate, int(loan_term_years))
+
+    annual_fr = fr_metrics.get("annual", {})
+    fr_operating_cash = float(annual_fr.get("net", 0.0))
+
+    daily_history_raw = pzu_metrics.get("daily_history")
+    pzu_annual_profit = 0.0
+    if isinstance(daily_history_raw, list) and daily_history_raw:
+        pzu_df = pd.DataFrame(daily_history_raw)
+        if 'daily_profit_eur' in pzu_df.columns:
+            total_profit = float(pzu_df['daily_profit_eur'].sum())
+            days = len(pzu_df)
+            avg_daily = total_profit / days if days else 0.0
+            pzu_annual_profit = avg_daily * 365.0
+
+    operating_cash_annual = fr_operating_cash + pzu_annual_profit
+
+    st.markdown("### Financing Summary")
+    summary_cols = st.columns(4)
+    with summary_cols[0]:
+        st.metric("Equity invested", format_currency(equity_required, decimals=0))
+    with summary_cols[1]:
+        st.metric("Debt principal", format_currency(loan_principal, decimals=0))
+    with summary_cols[2]:
+        st.metric("Annual debt service", format_currency(annual_debt_service, decimals=0))
+    with summary_cols[3]:
+        st.metric(
+            "Annual operating cash",
+            format_currency(operating_cash_annual, decimals=0),
+            help="FR net cash + PZU net cash",
+        )
+
+    rows = []
+    cumulative = -equity_required
+    rows.append(
+        {
+            "Year": 0,
+            "FR cash €": 0.0,
+            "PZU cash €": 0.0,
+            "Operating €": 0.0,
+            "Debt service €": 0.0,
+            "Net cash €": -equity_required,
+            "Cumulative €": cumulative,
+        }
+    )
+
+    for year in range(1, int(analysis_years) + 1):
+        fr_cash = fr_operating_cash
+        pzu_cash = pzu_annual_profit
+        operating = fr_cash + pzu_cash
+        debt_service = annual_debt_service if year <= loan_term_years else 0.0
+        net = operating - debt_service
+        cumulative += net
+        rows.append(
+            {
+                "Year": year,
+                "FR cash €": fr_cash,
+                "PZU cash €": pzu_cash,
+                "Operating €": operating,
+                "Debt service €": debt_service,
+                "Net cash €": net,
+                "Cumulative €": cumulative,
+            }
+        )
+
+    cashflow_df = pd.DataFrame(rows)
+    cashflow_df_display = cashflow_df.copy()
+    for col in ["FR cash €", "PZU cash €", "Operating €", "Debt service €", "Net cash €", "Cumulative €"]:
+        cashflow_df_display[col] = cashflow_df_display[col].apply(lambda v: format_currency(v, decimals=0))
+
+    st.markdown("### Project Cashflow")
+    st.dataframe(cashflow_df_display, width='stretch')
+
+    payback_year = next((row["Year"] for row in rows if row["Cumulative €"] >= 0), None)
+    roi = 0.0
+    total_positive = sum(row["Net cash €"] for row in rows if row["Year"] > 0)
+    if equity_required > 0:
+        roi = (total_positive - equity_required) / equity_required
+
+    st.markdown("### Key Metrics")
+    metric_cols = st.columns(3)
+    with metric_cols[0]:
+        st.metric("Payback year", "—" if payback_year is None else payback_year)
+    with metric_cols[1]:
+        st.metric("Simple ROI", f"{roi * 100:.1f}%")
+    with metric_cols[2]:
+        st.metric("Loan principal", format_currency(loan_principal, decimals=0))
+
+
 view = st.radio(
     "View",
     options=[
@@ -2632,6 +2824,7 @@ view = st.radio(
         "Romanian BM",
         "Market Comparison",
         "FR Energy Hedging",
+        "Investment & Financing",
     ],
     horizontal=True,
 )
@@ -3948,3 +4141,6 @@ if view == "FR Energy Hedging":
         ]
         year_df = year_df[[col for col in preferred_order if col in year_df.columns]]
         st.dataframe(year_df, width='stretch')
+
+if view == "Investment & Financing":
+    render_investment_financing_analysis(cfg)
