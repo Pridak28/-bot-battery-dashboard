@@ -943,6 +943,56 @@ def build_hedge_price_curve(
     return out
 
 
+def compute_activation_factor_series(
+    system_df: pd.DataFrame,
+    reference_mw: float,
+    *,
+    smoothing: Optional[str] = None,
+) -> pd.Series:
+    """Compute activation duty factors from system imbalance data.
+
+    Parameters
+    ----------
+    system_df : pd.DataFrame
+        DataFrame with columns ``date`` (datetime-like), ``slot`` (int), ``imbalance_mw`` (float).
+    reference_mw : float
+        Reference MW against which to normalise imbalance. Represents the aggregate MW
+        of reserve the user expects to cover.
+    smoothing : {None, "monthly"}
+        Optional aggregation level. If ``"monthly"``, average factors per calendar month
+        to reduce volatility. Defaults to per-ISP factors.
+    """
+
+    if reference_mw <= 0:
+        return pd.Series(dtype=float)
+    if system_df is None or system_df.empty:
+        return pd.Series(dtype=float)
+
+    df = system_df.copy()
+    df['date'] = pd.to_datetime(df['date'])
+    if 'imbalance_mw' not in df.columns:
+        return pd.Series(dtype=float)
+
+    df['activation_factor'] = (df['imbalance_mw'].abs() / float(reference_mw)).clip(lower=0.0, upper=1.0)
+
+    if smoothing == 'monthly':
+        df['month'] = df['date'].dt.to_period('M')
+        grouped = df.groupby(['month', 'slot'])['activation_factor'].mean().reset_index()
+        grouped['date'] = grouped['month'].dt.to_timestamp()
+        grouped = grouped.drop(columns=['month'])
+        df = grouped
+
+    df = df.dropna(subset=['date', 'slot', 'activation_factor'])
+    if df.empty:
+        return pd.Series(dtype=float)
+
+    idx = pd.MultiIndex.from_arrays([
+        pd.to_datetime(df['date']).values,
+        df['slot'].astype(int).values,
+    ], names=['date', 'slot'])
+    return pd.Series(df['activation_factor'].values, index=idx)
+
+
 def _month_key(d: pd.Timestamp) -> str:
     return f"{d.year:04d}-{d.month:02d}"
 
@@ -1319,6 +1369,9 @@ def simulate_frequency_regulation_revenue_multi(
     activation_factor_map: Optional[Dict[str, float]] = None,
     calendars: Optional[Dict[str, pd.DataFrame]] = None,
     system_imbalance_df: Optional[pd.DataFrame] = None,
+    activation_curve_map: Optional[Dict[str, pd.Series]] = None,
+    activation_price_mode: str = "market",
+    pay_as_bid_map: Optional[Dict[str, Dict[str, float]]] = None,
     battery_power_mw: Optional[float] = None,
 ) -> Dict:
     """Multi-product simulation for FCR/aFRR/mFRR with separate contracted MW, capacity prices, and thresholds.
@@ -1398,25 +1451,62 @@ def simulate_frequency_regulation_revenue_multi(
                 down_mask = down_mask & (mdf['imbalance_mw'].fillna(0) < 0)
 
             # Apply per-product activation factor (0..1)
-            act_factor = 1.0
+            act_factor_default = 1.0
             if activation_factor_map and prod in activation_factor_map:
                 try:
-                    act_factor = max(0.0, float(activation_factor_map.get(prod, 1.0)))
+                    act_factor_default = max(0.0, float(activation_factor_map.get(prod, 1.0)))
                 except Exception:
-                    act_factor = 1.0
-            slot_act_mw = mdf['avail_mw']
+                    act_factor_default = 1.0
+
+            custom_activation = None
+            if activation_curve_map and prod in activation_curve_map:
+                custom_activation = activation_curve_map.get(prod)
+
+            if custom_activation is not None and not custom_activation.empty:
+                lookup_index = pd.MultiIndex.from_arrays([
+                    mdf['date'].values,
+                    mdf['slot'].astype(int).values,
+                ])
+                looked_up = custom_activation.reindex(lookup_index)
+                act_factor_series = pd.Series(looked_up.values, index=mdf.index)
+                act_factor_series = act_factor_series.fillna(act_factor_default).clip(lower=0.0, upper=1.0)
+            else:
+                act_factor_series = pd.Series(act_factor_default, index=mdf.index)
+
+            slot_act_mw = mdf['avail_mw'] * act_factor_series
             # Battery power cap during activation
             if battery_power_mw is not None:
                 slot_act_mw = np.minimum(slot_act_mw, float(battery_power_mw))
-            energy_per_slot_series = slot_act_mw * 0.25 * act_factor
+            if has_imbalance and 'imbalance_mw' in mdf.columns:
+                imbalance_cap = mdf['imbalance_mw'].abs().fillna(0.0)
+                slot_act_mw = np.minimum(slot_act_mw, imbalance_cap)
+            energy_per_slot_series = slot_act_mw * 0.25
             price_series = mdf['price_eur_mwh']
-            up_rev = float((price_series[up_mask] * energy_per_slot_series[up_mask]).sum())
+
+            activation_price_mode_lower = (activation_price_mode or "market").lower()
+            up_price_series = price_series.copy()
+            down_price_series = price_series.copy()
+
+            if activation_price_mode_lower == "pay_as_bid" and pay_as_bid_map and prod in pay_as_bid_map:
+                pay_prices = pay_as_bid_map.get(prod, {})
+                try:
+                    up_const = float(pay_prices.get('up_price', up_price_series.mean()))
+                except Exception:
+                    up_const = float(up_price_series.mean()) if not up_price_series.empty else 0.0
+                try:
+                    down_const = float(pay_prices.get('down_price', up_const))
+                except Exception:
+                    down_const = up_const
+                up_price_series = pd.Series(up_const, index=mdf.index)
+                down_price_series = pd.Series(down_const, index=mdf.index)
+
+            up_rev = float((up_price_series[up_mask] * energy_per_slot_series[up_mask]).sum())
             # Per-product override for down-activation settlement sign
             prod_down_positive = pay_down_positive_map.get(prod, pay_down_as_positive) if pay_down_positive_map else pay_down_as_positive
             if prod_down_positive:
-                down_rev = float((price_series[down_mask].abs() * energy_per_slot_series[down_mask]).sum())
+                down_rev = float((down_price_series[down_mask].abs() * energy_per_slot_series[down_mask]).sum())
             else:
-                down_rev = float((price_series[down_mask] * energy_per_slot_series[down_mask]).sum())
+                down_rev = float((down_price_series[down_mask] * energy_per_slot_series[down_mask]).sum())
             act_rev = up_rev + down_rev
             act_energy = float(energy_per_slot_series.sum())
             # Use hedge curve when available; otherwise fall back to absolute imbalance prices
@@ -1439,7 +1529,7 @@ def simulate_frequency_regulation_revenue_multi(
 
             try:
                 print(
-                    f"[FR DEBUG] {prod} {month}: cap={cap_rev:.2f}€ act={act_rev:.2f}€ energy={act_energy:.2f}MWh hedge_cost={energy_cost:.2f}€",
+                    f"[FR DEBUG] {prod} {month}: cap={cap_rev:.2f}€ act={act_rev:.2f}€ energy={act_energy:.2f}MWh hedge_cost={energy_cost:.2f}€ pricing={activation_price_mode_lower}",
                 )
             except Exception:
                 pass
@@ -1922,6 +2012,7 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
     cfg_fx = float(data_cfg.get('fx_ron_per_eur', 5.0))
 
     sample_export8 = project_root / "data" / "export-8-sample.xlsx"
+    sample_sysimb = project_root / "data" / "Estimated power system imbalance.xlsx"
     default_export8 = (
         "export-8.xlsx"
         if Path("export-8.xlsx").exists()
@@ -1951,6 +2042,34 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
         if use_sel_price and selected_price != "(none)":
             st.session_state['fr_price_path'] = selected_price
         export8_path = st.text_input("Path to export-8 Excel or folder", key='fr_price_path')
+
+        sysimb_candidates = _list_in_data_dir([
+            r"estimated.*power.*system.*imbalance",
+            r"power.*system.*imbalance",
+            r"imbalance.*system.*xlsx",
+            r"imbalance.*system.*csv",
+        ]) or []
+        if not sysimb_candidates:
+            sysimb_candidates = _list_in_data_dir([r".*\\.xlsx$", r".*\\.xls$", r".*\\.csv$"]) or []
+        selected_sysimb = st.selectbox(
+            "Detected system imbalance files",
+            options=["(none)"] + sysimb_candidates,
+            key='fr_sysimb_detect',
+        )
+        if 'fr_sysimb_path' not in st.session_state:
+            default_sysimb = ""
+            if sample_sysimb.exists():
+                default_sysimb = str(sample_sysimb)
+            else:
+                default_sysimb = _find_in_data_dir([
+                    r"estimated.*power.*system.*imbalance",
+                    r"imbalance.*power.*system",
+                ]) or ""
+            st.session_state['fr_sysimb_path'] = default_sysimb
+        use_sel_sysimb = st.button("Use selected imbalance", key='fr_use_sysimb')
+        if use_sel_sysimb and selected_sysimb != "(none)":
+            st.session_state['fr_sysimb_path'] = selected_sysimb
+        sysimb_path = st.text_input("System imbalance Excel/folder", key='fr_sysimb_path')
 
     with colx2:
         excel_currency = st.selectbox("Excel currency", options=["RON","EUR"], index=0)
@@ -1996,6 +2115,99 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
     }
     paydown_map = {'FCR': fcr_down_pos, 'aFRR': afrr_down_pos, 'mFRR': mfrr_down_pos}
     act_map = {'FCR': fcr_act, 'aFRR': afrr_act, 'mFRR': mfrr_act}
+
+    ref_cols = st.columns(3)
+    with ref_cols[0]:
+        fcr_ref_mw = st.number_input(
+            "FCR activation reference MW",
+            min_value=1.0,
+            max_value=2000.0,
+            value=float(fr_cfg.get('FCR', {}).get('activation_reference_mw', 50.0)),
+            step=1.0,
+            help="Approximate total MW of imbalance reserve to normalise FCR activation factors.",
+        )
+    with ref_cols[1]:
+        afrr_ref_mw = st.number_input(
+            "aFRR activation reference MW",
+            min_value=1.0,
+            max_value=2000.0,
+            value=float(fr_cfg.get('aFRR', {}).get('activation_reference_mw', 80.0)),
+            step=1.0,
+        )
+    with ref_cols[2]:
+        mfrr_ref_mw = st.number_input(
+            "mFRR activation reference MW",
+            min_value=1.0,
+            max_value=2000.0,
+            value=float(fr_cfg.get('mFRR', {}).get('activation_reference_mw', 120.0)),
+            step=1.0,
+        )
+
+    smoothing_option = st.selectbox(
+        "Activation profile smoothing",
+        options=["Per ISP", "Monthly average"],
+        index=1,
+        help="Whether to average activation factors per 15-min slot or by month to reduce volatility.",
+    )
+
+    pricing_mode_label = st.selectbox(
+        "Activation pricing mode",
+        options=["Market prices (export data)", "Pay-as-bid (manual)"]
+    )
+    activation_price_mode = "market" if pricing_mode_label == "Market prices (export data)" else "pay_as_bid"
+
+    pay_as_bid_map: Dict[str, Dict[str, float]] = {}
+    if activation_price_mode == "pay_as_bid":
+        st.caption("Enter the accepted pay-as-bid activation prices (€/MWh) for each product.")
+        pay_cols = st.columns(3)
+        with pay_cols[0]:
+            fcr_up_price = st.number_input(
+                "FCR up €/MWh",
+                min_value=0.0,
+                max_value=1000.0,
+                value=float(fr_cfg.get('FCR', {}).get('pay_as_bid_up', 80.0)),
+                step=1.0,
+            )
+            fcr_down_price = st.number_input(
+                "FCR down €/MWh",
+                min_value=-1000.0,
+                max_value=1000.0,
+                value=float(fr_cfg.get('FCR', {}).get('pay_as_bid_down', 80.0)),
+                step=1.0,
+            )
+            pay_as_bid_map['FCR'] = {'up_price': fcr_up_price, 'down_price': fcr_down_price}
+        with pay_cols[1]:
+            afrr_up_price = st.number_input(
+                "aFRR up €/MWh",
+                min_value=0.0,
+                max_value=1000.0,
+                value=float(fr_cfg.get('aFRR', {}).get('pay_as_bid_up', 90.0)),
+                step=1.0,
+            )
+            afrr_down_price = st.number_input(
+                "aFRR down €/MWh",
+                min_value=-1000.0,
+                max_value=1000.0,
+                value=float(fr_cfg.get('aFRR', {}).get('pay_as_bid_down', 90.0)),
+                step=1.0,
+            )
+            pay_as_bid_map['aFRR'] = {'up_price': afrr_up_price, 'down_price': afrr_down_price}
+        with pay_cols[2]:
+            mfrr_up_price = st.number_input(
+                "mFRR up €/MWh",
+                min_value=0.0,
+                max_value=1000.0,
+                value=float(fr_cfg.get('mFRR', {}).get('pay_as_bid_up', 100.0)),
+                step=1.0,
+            )
+            mfrr_down_price = st.number_input(
+                "mFRR down €/MWh",
+                min_value=-1000.0,
+                max_value=1000.0,
+                value=float(fr_cfg.get('mFRR', {}).get('pay_as_bid_down', 100.0)),
+                step=1.0,
+            )
+            pay_as_bid_map['mFRR'] = {'up_price': mfrr_up_price, 'down_price': mfrr_down_price}
 
     st.caption("Optional availability calendars (CSV/XLSX). Columns: date, slot, available_mw or available(0/1).")
     cal1, cal2, cal3 = st.columns(3)
@@ -2045,7 +2257,35 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
         else:
             cap_power_mw = power_mw
 
-    has_imbalance_flag = False
+    sysimb_df = pd.DataFrame()
+    activation_reference_map = {
+        'FCR': fcr_ref_mw,
+        'aFRR': afrr_ref_mw,
+        'mFRR': mfrr_ref_mw,
+    }
+    activation_curves_map: Dict[str, pd.Series] = {}
+
+    if sysimb_path:
+        try:
+            sysimb_df = load_system_imbalance_from_excel(sysimb_path)
+            if sysimb_df.empty:
+                st.info("System imbalance file loaded but contained no usable rows.")
+        except Exception as exc:
+            sysimb_df = pd.DataFrame()
+            st.warning(f"Failed to load system imbalance data: {exc}")
+
+    smoothing_flag = 'monthly' if smoothing_option == 'Monthly average' else None
+
+    if not sysimb_df.empty:
+        for prod, ref in activation_reference_map.items():
+            if ref and ref > 0:
+                series = compute_activation_factor_series(sysimb_df, ref, smoothing=smoothing_flag)
+                if not series.empty:
+                    activation_curves_map[prod] = series
+        if activation_curves_map:
+            st.caption("Using system imbalance history to derive activation duty factors.")
+
+    has_imbalance_flag = not sysimb_df.empty
 
     if export8_path:
         try:
@@ -2115,8 +2355,7 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                 except Exception:
                     pass
                 price_dates = pd.to_datetime(imb_df['date'], errors='coerce').dropna().dt.normalize().unique()
-                sysimb_df = pd.DataFrame()
-                has_imbalance_flag = False
+                has_imbalance_flag = bool(activation_curves_map)
                 simm = simulate_frequency_regulation_revenue_multi(
                     imb_df,
                     products_cfg,
@@ -2125,6 +2364,9 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                     activation_factor_map=act_map,
                     calendars=calendars_cfg,
                     system_imbalance_df=sysimb_df,
+                    activation_curve_map=activation_curves_map,
+                    activation_price_mode=activation_price_mode,
+                    pay_as_bid_map=pay_as_bid_map if activation_price_mode == 'pay_as_bid' else None,
                     battery_power_mw=cap_power_mw,
                 )
 
