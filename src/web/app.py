@@ -1103,26 +1103,6 @@ def _list_in_data_dir(patterns: List[str]) -> List[str]:
             seen.add(s)
     return uniq
 
-
-def _compute_overlap_stats(price_df: pd.DataFrame, sysimb_df: pd.DataFrame) -> Dict[str, float]:
-    """Compute overlap stats between price and system imbalance frames by (date, slot)."""
-    try:
-        if price_df is None or price_df.empty or sysimb_df is None or sysimb_df.empty:
-            return {'price_rows': 0.0, 'imb_rows': 0.0, 'matched_rows': 0.0, 'match_frac': 0.0}
-        a = price_df[['date','slot']].copy()
-        b = sysimb_df[['date','slot']].copy()
-        a['date'] = pd.to_datetime(a['date'])
-        b['date'] = pd.to_datetime(b['date'])
-        merged = a.merge(b, on=['date','slot'], how='inner')
-        pr = float(len(a))
-        ir = float(len(b))
-        mr = float(len(merged))
-        frac = (mr / pr) if pr > 0 else 0.0
-        return {'price_rows': pr, 'imb_rows': ir, 'matched_rows': mr, 'match_frac': frac}
-    except Exception:
-        return {'price_rows': 0.0, 'imb_rows': 0.0, 'matched_rows': 0.0, 'match_frac': 0.0}
-
-
 @st.cache_data(show_spinner=False)
 def parse_battery_specs_from_document(path: str) -> Dict[str, Optional[float]]:
     """Parse a technical proposal PDF/DOC/CSV for basic battery specs.
@@ -1457,6 +1437,13 @@ def simulate_frequency_regulation_revenue_multi(
                 + (energy_per_slot_series[down_mask] * hedge_prices[down_mask]).sum()
             )
 
+            try:
+                print(
+                    f"[FR DEBUG] {prod} {month}: cap={cap_rev:.2f}€ act={act_rev:.2f}€ energy={act_energy:.2f}MWh hedge_cost={energy_cost:.2f}€",
+                )
+            except Exception:
+                pass
+
             row = {
                 'month': str(month),
                 'hours_in_data': hours_in_data,
@@ -1515,6 +1502,14 @@ def simulate_frequency_regulation_revenue_multi(
         'energy_cost_eur': comb_cost,
         'months': len(combined_monthly),
     }
+
+    try:
+        comb_energy = sum(r.get('activation_energy_mwh', 0.0) for r in combined_monthly)
+        print(
+            f"[FR DEBUG] Combined totals: cap={comb_cap:.2f}€ act={comb_act:.2f}€ energy={comb_energy:.2f}MWh hedge_cost={comb_cost:.2f}€ months={len(combined_monthly)}",
+        )
+    except Exception:
+        pass
 
     return {
         'monthly_by_product': monthly_by_product,
@@ -1927,7 +1922,6 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
     cfg_fx = float(data_cfg.get('fx_ron_per_eur', 5.0))
 
     sample_export8 = project_root / "data" / "export-8-sample.xlsx"
-    sample_sysimb = project_root / "data" / "Estimated power system imbalance.xlsx"
     default_export8 = (
         "export-8.xlsx"
         if Path("export-8.xlsx").exists()
@@ -1958,21 +1952,6 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
             st.session_state['fr_price_path'] = selected_price
         export8_path = st.text_input("Path to export-8 Excel or folder", key='fr_price_path')
 
-        sysimb_candidates = _list_in_data_dir([r"estimated.*power.*system.*imbalance", r"power.*system.*imbalance", r"imbalance.*system.*xlsx", r"imbalance.*system.*csv"]) or []
-        if not sysimb_candidates:
-            sysimb_candidates = _list_in_data_dir([r".*\\.xlsx$", r".*\\.xls$", r".*\\.csv$"]) or []
-        selected_sysimb = st.selectbox("Detected system imbalance files", options=["(none)"] + sysimb_candidates, key='fr_sysimb_detect')
-        if 'fr_sysimb_path' not in st.session_state:
-            default_sysimb = ""
-            if sample_sysimb.exists():
-                default_sysimb = str(sample_sysimb)
-            else:
-                default_sysimb = _find_in_data_dir([r"estimated.*power.*system.*imbalance", r"imbalance.*power.*system"]) or ""
-            st.session_state['fr_sysimb_path'] = default_sysimb
-        use_sel_sysimb = st.button("Use selected imbalance", key='fr_use_sysimb')
-        if use_sel_sysimb and selected_sysimb != "(none)":
-            st.session_state['fr_sysimb_path'] = selected_sysimb
-        sysimb_path = st.text_input("System Imbalance Excel/folder (optional)", key='fr_sysimb_path')
     with colx2:
         excel_currency = st.selectbox("Excel currency", options=["RON","EUR"], index=0)
         fx_rate = st.number_input("FX RON/EUR", min_value=1.0, max_value=10.0, value=cfg_fx, step=0.1, help="Used if Excel prices are in RON/MWh")
@@ -2136,19 +2115,8 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                 except Exception:
                     pass
                 price_dates = pd.to_datetime(imb_df['date'], errors='coerce').dropna().dt.normalize().unique()
-                sysimb_df = (
-                    load_system_imbalance_from_excel(sysimb_path, target_dates=price_dates)
-                    if sysimb_path
-                    else pd.DataFrame()
-                )
-                # Overlap diagnostics and fallback
-                if not sysimb_df.empty:
-                    stats = _compute_overlap_stats(imb_df, sysimb_df)
-                    st.caption(f"System imbalance overlap: {int(stats['matched_rows'])}/{int(stats['price_rows'])} price rows (~{stats['match_frac']*100:.1f}%)")
-                    if stats['match_frac'] < 0.3:
-                        st.warning("Low overlap between price and system imbalance (<30%). Falling back to price‑only activation.")
-                        sysimb_df = pd.DataFrame()
-                has_imbalance_flag = not sysimb_df.empty
+                sysimb_df = pd.DataFrame()
+                has_imbalance_flag = False
                 simm = simulate_frequency_regulation_revenue_multi(
                     imb_df,
                     products_cfg,
@@ -2208,6 +2176,13 @@ def render_frequency_regulation_simulator(cfg: dict) -> None:
                         st.caption(
                             f"Activation energy ({label}) ≈ {activation_energy_total:.0f} MWh"
                         )
+
+                        try:
+                            print(
+                                f"[FR DEBUG] Window {label}: cap={cap_all:.2f}€ act={act_all:.2f}€ net_energy={activation_energy_total:.2f}MWh hedge_cost={energy_cost_total:.2f}€",
+                            )
+                        except Exception:
+                            pass
 
                         # Highlight when external constraints suppress activation volumes
                         enabled_products = [
