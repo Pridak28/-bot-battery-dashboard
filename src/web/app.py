@@ -3106,7 +3106,7 @@ def render_investment_financing_analysis(cfg: dict) -> None:
 
     st.markdown("### FR Cashflow")
     if not fr_monthly_display.empty:
-        tab_fr_month, tab_fr_year = st.tabs(["Monthly", "Yearly"], key="fr_cashflow_tabs")
+        tab_fr_month, tab_fr_year = st.tabs(["Monthly", "Yearly"])
         with tab_fr_month:
             st.dataframe(fr_monthly_display, width="stretch")
         with tab_fr_year:
@@ -3116,7 +3116,7 @@ def render_investment_financing_analysis(cfg: dict) -> None:
 
     st.markdown("### PZU Cashflow")
     if not pzu_monthly_display.empty:
-        tab_pzu_month, tab_pzu_year = st.tabs(["Monthly", "Yearly"], key="pzu_cashflow_tabs")
+        tab_pzu_month, tab_pzu_year = st.tabs(["Monthly", "Yearly"])
         with tab_pzu_month:
             st.dataframe(pzu_monthly_display, width="stretch")
         with tab_pzu_year:
