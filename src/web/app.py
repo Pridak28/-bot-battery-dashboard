@@ -134,6 +134,103 @@ def _sanitize_session_value(value):
         return value
 
 
+def backfill_fr_monthly_dataframe(
+    fr_months_df: Optional[pd.DataFrame],
+    *,
+    start_period: Optional[pd.Period] = None,
+    end_period: Optional[pd.Period] = None,
+) -> pd.DataFrame:
+    """Return FR monthly data covering the requested period range, filling gaps with averages."""
+
+    if fr_months_df is None:
+        return pd.DataFrame()
+
+    df = fr_months_df.copy()
+    if df.empty:
+        return df
+
+    if "month_period" in df.columns:
+        period_col = df["month_period"]
+    elif "month" in df.columns:
+        try:
+            period_col = pd.PeriodIndex(df["month"], freq="M")
+        except Exception:
+            period_col = pd.to_datetime(df["month"], errors="coerce").dt.to_period("M")
+    else:
+        period_col = pd.to_datetime(df.index, errors="coerce").to_series().dt.to_period("M")
+
+    period_col = pd.Series(period_col)
+    df["month_period"] = period_col
+    df = df.dropna(subset=["month_period"]).sort_values("month_period")
+
+    if df.empty:
+        return df
+
+    default_start = df["month_period"].min()
+    default_end = df["month_period"].max()
+
+    period_start = start_period if start_period is not None else default_start
+    period_end = end_period if end_period is not None else default_end
+
+    if period_start is None or period_end is None:
+        return df
+
+    if period_start > period_end:
+        period_start, period_end = period_end, period_start
+
+    full_index = pd.period_range(period_start, period_end, freq="M")
+    df = df.set_index("month_period").reindex(full_index)
+    df.index.name = "month_period"
+
+    numeric_cols = [
+        "capacity_revenue_eur",
+        "activation_revenue_eur",
+        "total_revenue_eur",
+        "energy_cost_eur",
+        "activation_energy_mwh",
+        "hours_in_data",
+        "up_slots",
+        "down_slots",
+    ]
+
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    for col in df.columns:
+        if col in {"month", "month_period"}:
+            continue
+        series = df[col]
+        if not np.issubdtype(series.dtype, np.number):
+            try:
+                series = pd.to_numeric(series, errors="coerce")
+            except Exception:
+                continue
+        df[col] = series
+
+    for col in df.columns:
+        if col in {"month", "month_period"}:
+            continue
+        series = df[col]
+        if np.issubdtype(series.dtype, np.number):
+            valid = series.dropna()
+            fill_value = valid.mean() if not valid.empty else 0.0
+            df[col] = series.fillna(fill_value)
+
+    if "capacity_revenue_eur" in df.columns and "activation_revenue_eur" in df.columns:
+        computed_total = df["capacity_revenue_eur"].fillna(0.0) + df["activation_revenue_eur"].fillna(0.0)
+        if "total_revenue_eur" not in df.columns:
+            df["total_revenue_eur"] = computed_total
+        else:
+            df["total_revenue_eur"] = df["total_revenue_eur"].fillna(computed_total)
+
+    df = df.reset_index()
+    df.rename(columns={"index": "month_period"}, inplace=True)
+    df["month"] = df["month_period"].astype(str)
+
+    return df
+
+
 def safe_session_state_update(key: str, new_value: dict) -> None:
     """Update Streamlit session state without triggering rerun loops."""
     try:
@@ -2653,8 +2750,9 @@ apply_theme()
 st.caption("Choose a view below, set config in the sidebar, then Run Strategy.")
 
 
+
 def render_investment_financing_analysis(cfg: dict) -> None:
-    """Show investment, capital structure, and financing cashflow analysis."""
+    """Analyse investment and financing for FR and PZU businesses independently."""
 
     fr_metrics = st.session_state.get("fr_market_metrics")
     pzu_metrics = st.session_state.get("pzu_market_metrics")
@@ -2677,6 +2775,8 @@ def render_investment_financing_analysis(cfg: dict) -> None:
     default_equity_pct = float(investment_cfg.get("equity_percent", 30.0))
     default_interest = float(investment_cfg.get("loan_interest_percent", 6.0))
     default_term = int(investment_cfg.get("loan_term_years", 7))
+    default_fr_opex = float(investment_cfg.get("fr_operating_cost_annual", 0.0))
+    default_pzu_opex = float(investment_cfg.get("pzu_operating_cost_annual", 0.0))
 
     col_inputs = st.columns(3)
     with col_inputs[0]:
@@ -2714,7 +2814,7 @@ def render_investment_financing_analysis(cfg: dict) -> None:
             min_value=0,
             max_value=100,
             value=int(round(default_equity_pct)),
-            help="Share of the investment covered with own capital (rest assumed financed by debt).",
+            help="Share of each business' investment covered with equity (remainder financed with debt).",
         )
     with col_fin[1]:
         interest_rate_pct = st.number_input(
@@ -2725,27 +2825,50 @@ def render_investment_financing_analysis(cfg: dict) -> None:
             step=0.1,
         )
     with col_fin[2]:
-        loan_term_years = st.number_input(
-            "Loan term (years)",
-            min_value=1,
-            max_value=25,
-            value=default_term,
-            step=1,
+        loan_term_years = int(
+            st.number_input(
+                "Loan term (years)",
+                min_value=1,
+                max_value=25,
+                value=default_term,
+                step=1,
+            )
         )
 
-    analysis_years = st.number_input(
-        "Cashflow horizon (years)",
-        min_value=loan_term_years,
-        max_value=30,
-        value=max(loan_term_years, 10),
-        step=1,
-        help="Projection length for cashflow analysis (must be ≥ loan term).",
+    investment_split_pct = st.slider(
+        "Investment allocated to FR (%)",
+        min_value=0,
+        max_value=100,
+        value=50,
+        step=5,
+        help="Share of the total capex allocated to the FR business; the remainder is assigned to PZU trading.",
     )
 
+    st.markdown("### Operating Cost Assumptions")
+    cost_cols = st.columns(2)
+    with cost_cols[0]:
+        fr_operating_cost_annual = st.number_input(
+            "FR operating cost (€/year)",
+            min_value=0.0,
+            value=default_fr_opex,
+            step=25_000.0,
+        )
+    with cost_cols[1]:
+        pzu_operating_cost_annual = st.number_input(
+            "PZU operating cost (€/year)",
+            min_value=0.0,
+            value=default_pzu_opex,
+            step=25_000.0,
+        )
+
     equity_ratio = equity_pct / 100.0
-    equity_required = total_investment * equity_ratio
-    loan_principal = total_investment - equity_required
     interest_rate = interest_rate_pct / 100.0
+    fr_investment = total_investment * (investment_split_pct / 100.0)
+    pzu_investment = total_investment - fr_investment
+    fr_equity = fr_investment * equity_ratio
+    pzu_equity = pzu_investment * equity_ratio
+    fr_debt = fr_investment - fr_equity
+    pzu_debt = pzu_investment - pzu_equity
 
     def _annuity_payment(principal: float, rate: float, periods: int) -> float:
         if principal <= 0 or periods <= 0:
@@ -2755,93 +2878,263 @@ def render_investment_financing_analysis(cfg: dict) -> None:
         factor = (1 + rate) ** periods
         return principal * rate * factor / (factor - 1)
 
-    annual_debt_service = _annuity_payment(loan_principal, interest_rate, int(loan_term_years))
+    fr_annual_debt_service = _annuity_payment(fr_debt, interest_rate, loan_term_years)
+    pzu_annual_debt_service = _annuity_payment(pzu_debt, interest_rate, loan_term_years)
+    monthly_fr_opex = -fr_operating_cost_annual / 12.0 if fr_operating_cost_annual else 0.0
+    monthly_pzu_opex = -pzu_operating_cost_annual / 12.0 if pzu_operating_cost_annual else 0.0
+    monthly_fr_debt = -fr_annual_debt_service / 12.0 if fr_annual_debt_service else 0.0
+    monthly_pzu_debt = -pzu_annual_debt_service / 12.0 if pzu_annual_debt_service else 0.0
 
     annual_fr = fr_metrics.get("annual", {})
-    fr_operating_cash = float(annual_fr.get("net", 0.0))
+    fr_gross_revenue = float(annual_fr.get("total", 0.0))
+    fr_energy_cost = float(annual_fr.get("energy_cost", 0.0))
+    fr_base_net = float(annual_fr.get("net", 0.0))
+    fr_net_after_opex = fr_base_net - fr_operating_cost_annual
+    fr_net_after_debt = fr_net_after_opex - fr_annual_debt_service
 
     daily_history_raw = pzu_metrics.get("daily_history")
-    pzu_annual_profit = 0.0
-    if isinstance(daily_history_raw, list) and daily_history_raw:
-        pzu_df = pd.DataFrame(daily_history_raw)
-        if 'daily_profit_eur' in pzu_df.columns:
-            total_profit = float(pzu_df['daily_profit_eur'].sum())
-            days = len(pzu_df)
-            avg_daily = total_profit / days if days else 0.0
-            pzu_annual_profit = avg_daily * 365.0
-
-    operating_cash_annual = fr_operating_cash + pzu_annual_profit
+    pzu_df = pd.DataFrame(daily_history_raw) if isinstance(daily_history_raw, list) and daily_history_raw else pd.DataFrame()
+    pzu_base_net = 0.0
+    if not pzu_df.empty and "daily_profit_eur" in pzu_df.columns:
+        pzu_base_net = float(pzu_df["daily_profit_eur"].sum()) / max(len(pzu_df), 1) * 365.0
+    pzu_net_after_opex = pzu_base_net - pzu_operating_cost_annual
+    pzu_net_after_debt = pzu_net_after_opex - pzu_annual_debt_service
 
     st.markdown("### Financing Summary")
-    summary_cols = st.columns(4)
+    summary_cols = st.columns(2)
     with summary_cols[0]:
-        st.metric("Equity invested", format_currency(equity_required, decimals=0))
+        st.markdown("**Frequency Regulation (FR)**")
+        st.metric("Investment", format_currency(fr_investment, decimals=0))
+        st.metric("Equity", format_currency(fr_equity, decimals=0))
+        st.metric("Debt principal", format_currency(fr_debt, decimals=0))
+        st.metric("Annual debt service", format_currency(fr_annual_debt_service, decimals=0))
+        st.metric("Net after debt", format_currency(fr_net_after_debt, decimals=0))
     with summary_cols[1]:
-        st.metric("Debt principal", format_currency(loan_principal, decimals=0))
-    with summary_cols[2]:
-        st.metric("Annual debt service", format_currency(annual_debt_service, decimals=0))
-    with summary_cols[3]:
-        st.metric(
-            "Annual operating cash",
-            format_currency(operating_cash_annual, decimals=0),
-            help="FR net cash + PZU net cash",
-        )
+        st.markdown("**PZU Trading**")
+        st.metric("Investment", format_currency(pzu_investment, decimals=0))
+        st.metric("Equity", format_currency(pzu_equity, decimals=0))
+        st.metric("Debt principal", format_currency(pzu_debt, decimals=0))
+        st.metric("Annual debt service", format_currency(pzu_annual_debt_service, decimals=0))
+        st.metric("Net after debt", format_currency(pzu_net_after_debt, decimals=0))
 
-    rows = []
-    cumulative = -equity_required
-    rows.append(
-        {
-            "Year": 0,
-            "FR cash €": 0.0,
-            "PZU cash €": 0.0,
-            "Operating €": 0.0,
-            "Debt service €": 0.0,
-            "Net cash €": -equity_required,
-            "Cumulative €": cumulative,
-        }
+    st.markdown("### Operating Performance")
+    perf_cols = st.columns(2)
+    with perf_cols[0]:
+        st.metric("FR revenue", format_currency(fr_gross_revenue, decimals=0))
+        st.metric("FR energy cost", format_currency(fr_energy_cost, decimals=0))
+        st.metric("FR operating cost", format_currency(fr_operating_cost_annual, decimals=0))
+        st.metric("FR net after opex", format_currency(fr_net_after_opex, decimals=0))
+    with perf_cols[1]:
+        st.metric("PZU gross profit", format_currency(pzu_base_net, decimals=0))
+        st.metric("PZU operating cost", format_currency(pzu_operating_cost_annual, decimals=0))
+        st.metric("PZU net after opex", format_currency(pzu_net_after_opex, decimals=0))
+
+    raw_fr_months = fr_metrics.get("months") if isinstance(fr_metrics, dict) else None
+    fr_months_df = pd.DataFrame(raw_fr_months) if isinstance(raw_fr_months, list) and raw_fr_months else pd.DataFrame()
+
+    if not fr_months_df.empty:
+        if "month" in fr_months_df.columns:
+            try:
+                fr_months_df["month_period"] = pd.PeriodIndex(fr_months_df["month"], freq="M")
+            except Exception:
+                fr_months_df["month_period"] = pd.to_datetime(fr_months_df["month"], errors="coerce").dt.to_period("M")
+        elif "month_period" in fr_months_df.columns:
+            fr_months_df["month_period"] = pd.PeriodIndex(fr_months_df["month_period"], freq="M")
+        else:
+            fr_months_df["month_period"] = pd.to_datetime(fr_months_df.index, errors="coerce").to_series().dt.to_period("M")
+        fr_months_df = fr_months_df.dropna(subset=["month_period"]).sort_values("month_period")
+
+    pzu_monthly = pd.DataFrame()
+    if not pzu_df.empty and "date" in pzu_df.columns:
+        pzu_df["date"] = pd.to_datetime(pzu_df["date"], errors="coerce")
+        pzu_df = pzu_df.dropna(subset=["date"]).sort_values("date")
+        if not pzu_df.empty and "daily_profit_eur" in pzu_df.columns:
+            pzu_monthly = (
+                pzu_df.assign(month=pzu_df["date"].dt.to_period("M"))
+                .groupby("month", as_index=False)["daily_profit_eur"]
+                .sum()
+                .rename(columns={"daily_profit_eur": "total_profit_eur"})
+                .sort_values("month")
+            )
+            pzu_monthly["month_period"] = pd.PeriodIndex(pzu_monthly["month"], freq="M")
+
+    start_candidates: List[pd.Period] = []
+    end_candidates: List[pd.Period] = []
+    if not fr_months_df.empty:
+        start_candidates.append(fr_months_df["month_period"].min())
+        end_candidates.append(fr_months_df["month_period"].max())
+    if not pzu_monthly.empty:
+        start_candidates.append(pzu_monthly["month_period"].min())
+        end_candidates.append(pzu_monthly["month_period"].max())
+
+    range_start = min(start_candidates) if start_candidates else None
+    range_end = max(end_candidates) if end_candidates else None
+
+    if not fr_months_df.empty:
+        fr_months_df = backfill_fr_monthly_dataframe(fr_months_df, start_period=range_start, end_period=range_end)
+    if not pzu_monthly.empty and range_start is not None and range_end is not None:
+        monthly_index = pd.period_range(range_start, range_end, freq="M")
+        pzu_monthly = pzu_monthly.set_index("month_period").reindex(monthly_index)
+        pzu_monthly["total_profit_eur"] = pd.to_numeric(pzu_monthly["total_profit_eur"], errors="coerce")
+        if pzu_monthly["total_profit_eur"].notna().any():
+            pzu_monthly["total_profit_eur"] = pzu_monthly["total_profit_eur"].fillna(pzu_monthly["total_profit_eur"].mean())
+        else:
+            pzu_monthly["total_profit_eur"] = 0.0
+        pzu_monthly = pzu_monthly.reset_index().rename(columns={"index": "month_period"})
+        pzu_monthly["month"] = pzu_monthly["month_period"].astype(str)
+
+    fr_months_idx = fr_months_df.set_index("month_period") if not fr_months_df.empty else pd.DataFrame()
+    pzu_months_idx = pzu_monthly.set_index("month_period") if not pzu_monthly.empty else pd.DataFrame()
+
+    all_periods: List[pd.Period] = sorted(
+        set(fr_months_idx.index.to_list() if not fr_months_idx.empty else [])
+        | set(pzu_months_idx.index.to_list() if not pzu_months_idx.empty else [])
     )
 
-    for year in range(1, int(analysis_years) + 1):
-        fr_cash = fr_operating_cash
-        pzu_cash = pzu_annual_profit
-        operating = fr_cash + pzu_cash
-        debt_service = annual_debt_service if year <= loan_term_years else 0.0
-        net = operating - debt_service
-        cumulative += net
+    def _fill_mean(series: pd.Series) -> pd.Series:
+        series = pd.to_numeric(series, errors="coerce")
+        if series.notna().any():
+            return series.fillna(series.mean())
+        return series.fillna(0.0)
+
+    if all_periods:
+        if fr_months_idx.empty:
+            fr_months_idx = pd.DataFrame(index=pd.Index(all_periods, name="month_period"))
+        else:
+            fr_months_idx = fr_months_idx.reindex(all_periods)
+        for col in ["capacity_revenue_eur", "activation_revenue_eur", "total_revenue_eur", "energy_cost_eur"]:
+            if col not in fr_months_idx.columns:
+                fr_months_idx[col] = np.nan
+            fr_months_idx[col] = _fill_mean(fr_months_idx[col])
+        if "total_revenue_eur" not in fr_months_idx.columns or fr_months_idx["total_revenue_eur"].isna().all():
+            fr_months_idx["total_revenue_eur"] = fr_months_idx.get("capacity_revenue_eur", 0.0) + fr_months_idx.get("activation_revenue_eur", 0.0)
+        fr_months_idx["net_before_debt"] = (
+            fr_months_idx["total_revenue_eur"].fillna(0.0) - fr_months_idx["energy_cost_eur"].fillna(0.0) + monthly_fr_opex
+        )
+
+        if pzu_months_idx.empty:
+            pzu_months_idx = pd.DataFrame(index=pd.Index(all_periods, name="month_period"))
+        else:
+            pzu_months_idx = pzu_months_idx.reindex(all_periods)
+        pzu_months_idx["net_before_debt"] = _fill_mean(pzu_months_idx.get("total_profit_eur", 0.0)) + monthly_pzu_opex
+
+    loan_term_months = loan_term_years * 12
+
+    def build_cashflow_tables(monthly_series: pd.Series, monthly_debt_share: float, equity: float):
+        rows: List[Dict[str, object]] = []
+        cumulative = -equity
         rows.append(
             {
-                "Year": year,
-                "FR cash €": fr_cash,
-                "PZU cash €": pzu_cash,
-                "Operating €": operating,
-                "Debt service €": debt_service,
-                "Net cash €": net,
+                "Period": None,
+                "Month": "Initial",
+                "Net before debt €": 0.0,
+                "Debt service €": 0.0,
+                "Net after debt €": -equity,
                 "Cumulative €": cumulative,
             }
         )
+        if isinstance(monthly_series, pd.Series) and not monthly_series.empty:
+            monthly_series = pd.to_numeric(monthly_series, errors="coerce").fillna(0.0).sort_index()
+            for idx, (period, value) in enumerate(monthly_series.items(), start=1):
+                debt = monthly_debt_share if idx <= loan_term_months else 0.0
+                net_after_debt = float(value) + debt
+                cumulative += net_after_debt
+                rows.append(
+                    {
+                        "Period": period,
+                        "Month": str(period),
+                        "Net before debt €": float(value),
+                        "Debt service €": debt,
+                        "Net after debt €": net_after_debt,
+                        "Cumulative €": cumulative,
+                    }
+                )
 
-    cashflow_df = pd.DataFrame(rows)
-    cashflow_df_display = cashflow_df.copy()
-    for col in ["FR cash €", "PZU cash €", "Operating €", "Debt service €", "Net cash €", "Cumulative €"]:
-        cashflow_df_display[col] = cashflow_df_display[col].apply(lambda v: format_currency(v, decimals=0))
+        monthly_df = pd.DataFrame(rows)
+        display_monthly = monthly_df.drop(columns=["Period"]).copy()
+        for col in ["Net before debt €", "Debt service €", "Net after debt €", "Cumulative €"]:
+            display_monthly[col] = display_monthly[col].apply(lambda v: format_currency(v, decimals=0))
 
-    st.markdown("### Project Cashflow")
-    st.dataframe(cashflow_df_display, width='stretch')
+        yearly_rows: List[Dict[str, object]] = [
+            {
+                "Year": 0,
+                "Net before debt €": 0.0,
+                "Debt service €": 0.0,
+                "Net after debt €": -equity,
+                "Cumulative €": -equity,
+            }
+        ]
 
-    payback_year = next((row["Year"] for row in rows if row["Cumulative €"] >= 0), None)
-    roi = 0.0
-    total_positive = sum(row["Net cash €"] for row in rows if row["Year"] > 0)
-    if equity_required > 0:
-        roi = (total_positive - equity_required) / equity_required
+        monthly_calc = monthly_df.dropna(subset=["Period"]).copy()
+        if not monthly_calc.empty:
+            monthly_calc["Year"] = monthly_calc["Period"].apply(lambda p: int(p.year) if isinstance(p, pd.Period) else None)
+            yearly_group = (
+                monthly_calc.groupby("Year")[["Net before debt €", "Debt service €", "Net after debt €"]]
+                .sum()
+                .reset_index()
+                .sort_values("Year")
+            )
+            cumulative_year = -equity
+            for _, row in yearly_group.iterrows():
+                net_after = float(row["Net after debt €"])
+                cumulative_year += net_after
+                yearly_rows.append(
+                    {
+                        "Year": int(row["Year"]),
+                        "Net before debt €": float(row["Net before debt €"]),
+                        "Debt service €": float(row["Debt service €"]),
+                        "Net after debt €": net_after,
+                        "Cumulative €": cumulative_year,
+                    }
+                )
 
-    st.markdown("### Key Metrics")
-    metric_cols = st.columns(3)
-    with metric_cols[0]:
-        st.metric("Payback year", "—" if payback_year is None else payback_year)
-    with metric_cols[1]:
-        st.metric("Simple ROI", f"{roi * 100:.1f}%")
-    with metric_cols[2]:
-        st.metric("Loan principal", format_currency(loan_principal, decimals=0))
+        yearly_df = pd.DataFrame(yearly_rows)
+        display_yearly = yearly_df.copy()
+        for col in ["Net before debt €", "Debt service €", "Net after debt €", "Cumulative €"]:
+            display_yearly[col] = display_yearly[col].apply(lambda v: format_currency(v, decimals=0))
+
+        payback_year = next((row["Year"] for row in yearly_rows if row["Year"] and row["Cumulative €"] >= 0), None)
+        total_net_after_debt = sum(row["Net after debt €"] for row in yearly_rows if row["Year"])
+        roi = (total_net_after_debt / equity) if equity > 0 else 0.0
+        return display_monthly, display_yearly, payback_year, roi
+
+    fr_series = fr_months_idx["net_before_debt"] if not fr_months_idx.empty and "net_before_debt" in fr_months_idx else pd.Series(dtype=float)
+    pzu_series = pzu_months_idx["net_before_debt"] if not pzu_months_idx.empty and "net_before_debt" in pzu_months_idx else pd.Series(dtype=float)
+
+    fr_monthly_display, fr_yearly_display, fr_payback_year, fr_roi = build_cashflow_tables(fr_series, monthly_fr_debt, fr_equity)
+    pzu_monthly_display, pzu_yearly_display, pzu_payback_year, pzu_roi = build_cashflow_tables(pzu_series, monthly_pzu_debt, pzu_equity)
+
+    st.markdown("### FR Cashflow")
+    if not fr_monthly_display.empty:
+        tab_fr_month, tab_fr_year = st.tabs(["Monthly", "Yearly"], key="fr_cashflow_tabs")
+        with tab_fr_month:
+            st.dataframe(fr_monthly_display, width="stretch")
+        with tab_fr_year:
+            st.dataframe(fr_yearly_display, width="stretch")
+    else:
+        st.info("FR monthly cashflow data unavailable; run the FR Simulator for historical periods.")
+
+    st.markdown("### PZU Cashflow")
+    if not pzu_monthly_display.empty:
+        tab_pzu_month, tab_pzu_year = st.tabs(["Monthly", "Yearly"], key="pzu_cashflow_tabs")
+        with tab_pzu_month:
+            st.dataframe(pzu_monthly_display, width="stretch")
+        with tab_pzu_year:
+            st.dataframe(pzu_yearly_display, width="stretch")
+    else:
+        st.info("PZU monthly cashflow data unavailable; run the PZU Horizons analysis for historical periods.")
+
+    st.markdown("### Payback & ROI")
+    payback_cols = st.columns(2)
+    with payback_cols[0]:
+        st.markdown("**FR**")
+        st.metric("Payback year", "—" if fr_payback_year is None else fr_payback_year)
+        st.metric("ROI", "—" if fr_equity <= 0 else f"{fr_roi * 100:.1f}%")
+    with payback_cols[1]:
+        st.markdown("**PZU**")
+        st.metric("Payback year", "—" if pzu_payback_year is None else pzu_payback_year)
+        st.metric("ROI", "—" if pzu_equity <= 0 else f"{pzu_roi * 100:.1f}%")
+
 
 
 view = st.radio(
