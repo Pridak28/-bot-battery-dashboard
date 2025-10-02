@@ -3106,20 +3106,20 @@ def render_investment_financing_analysis(cfg: dict) -> None:
 
     st.markdown("### FR Cashflow")
     if not fr_monthly_display.empty:
-        tab_fr_month, tab_fr_year = st.tabs(["Monthly", "Yearly"])
-        with tab_fr_month:
+        fr_view = st.radio("FR table view", ["Monthly", "Yearly"], key="fr_cashflow_view")
+        if fr_view == "Monthly":
             st.dataframe(fr_monthly_display, width="stretch")
-        with tab_fr_year:
+        else:
             st.dataframe(fr_yearly_display, width="stretch")
     else:
         st.info("FR monthly cashflow data unavailable; run the FR Simulator for historical periods.")
 
     st.markdown("### PZU Cashflow")
     if not pzu_monthly_display.empty:
-        tab_pzu_month, tab_pzu_year = st.tabs(["Monthly", "Yearly"])
-        with tab_pzu_month:
+        pzu_view = st.radio("PZU table view", ["Monthly", "Yearly"], key="pzu_cashflow_view")
+        if pzu_view == "Monthly":
             st.dataframe(pzu_monthly_display, width="stretch")
-        with tab_pzu_year:
+        else:
             st.dataframe(pzu_yearly_display, width="stretch")
     else:
         st.info("PZU monthly cashflow data unavailable; run the PZU Horizons analysis for historical periods.")
