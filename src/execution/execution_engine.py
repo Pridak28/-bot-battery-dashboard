@@ -69,19 +69,21 @@ class ExecutionEngine:
                 self.risk.release_order(reservation_id)
                 self.log.debug(f"Released reservation {reservation_id} (order rejected)")
 
-            elif status in ("ACCEPTED", "PENDING", "PARTIAL"):
+            elif status in ("ACCEPTED", "ACCEPTED-DUMMY", "PENDING", "PARTIAL"):
                 # Order accepted/pending - track it for later release
                 order_id = res.get("order_id") or res.get("id")
                 if order_id:
                     self.active_orders[order_id] = reservation_id
 
                     # Start monitoring this order
+                    # Normalize status for monitor
+                    normalized_status = "ACCEPTED" if "ACCEPTED" in status else status
                     self.order_monitor.track_order(
                         order_id=order_id,
                         side=side,
                         volume_mwh=volume_mwh,
                         price_eur_mwh=price_eur_mwh,
-                        status=status,
+                        status=normalized_status,
                         reservation_id=reservation_id
                     )
 
