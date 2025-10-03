@@ -56,3 +56,21 @@ class PZUClient(MarketClient):
     def get_positions(self) -> Dict[str, Any]:
         # Placeholder
         return {"open_orders": 0}
+
+    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        """
+        Get order status from PZU.
+
+        In production, this would query the actual PZU API.
+        For now, returns a placeholder response.
+        """
+        # TODO: Replace with actual PZU API call
+        # Example: response = self._session.get(f"{self.base_url}/orders/{order_id}")
+
+        # Placeholder - in real implementation, query actual API
+        return {
+            "order_id": order_id,
+            "status": "FILLED",  # Placeholder status
+            "filled_volume_mwh": 0.0,
+            "remaining_volume_mwh": 0.0
+        }

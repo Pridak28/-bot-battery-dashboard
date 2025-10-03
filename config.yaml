@@ -26,7 +26,7 @@ markets:
     password: ${BM_PASSWORD}
 data:
   pzu_forecast_csv: ./data/pzu_history_3y.csv # Use 3-year historical data for proper monthly trends analysis
-  bm_forecast_csv: ./data/imbalance_history_3y.csv # Use 3-year historical data for comprehensive analysis
+  bm_forecast_csv: ./data/imbalance_history.csv # Updated: now contains DAMAS data + extended range (2024-01-05 → 2025-10-03)
   fx_ron_per_eur: 5.0
 strategy:
   pzu:

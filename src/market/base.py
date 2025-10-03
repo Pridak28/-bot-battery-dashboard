@@ -35,3 +35,26 @@ class MarketClient(ABC):
     @abstractmethod
     def get_positions(self) -> Dict[str, Any]:
         ...
+
+    @abstractmethod
+    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        """
+        Get current status of an order.
+
+        Returns:
+            Dict with keys:
+                - order_id: str
+                - status: str (PENDING, ACCEPTED, PARTIAL, FILLED, CANCELLED, REJECTED)
+                - filled_volume_mwh: float (total filled)
+                - remaining_volume_mwh: float (remaining)
+        """
+        ...
+
+    def get_all_orders_status(self) -> Sequence[Dict[str, Any]]:
+        """
+        Get status of all active orders.
+
+        Override this if the API supports batch status queries.
+        Default implementation returns empty list.
+        """
+        return []
