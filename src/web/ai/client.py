@@ -10,7 +10,8 @@ import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
 # Default model/version – adjust via GOOGLE_GENAI_MODEL env if needed.
-_model_name = os.environ.get("GOOGLE_GENAI_MODEL", "gemini-1.5-flash")
+# Updated to use Gemini 2.5 Flash (the latest available model as of 2025)
+_model_name = os.environ.get("GOOGLE_GENAI_MODEL", "gemini-2.5-flash")
 
 # The endpoint should be structured as /v1beta/models/{model}:{method}
 # The "models/" prefix is part of the path, not the model name itself.
