@@ -1,11 +1,19 @@
+"""
+AI Insights - Intelligent Battery Analytics Assistant with Full Data Access
+Uses Google Gemini 2.5 Flash with comprehensive platform data context
+"""
+
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
+from pathlib import Path
+import json
 
 import pandas as pd
 import streamlit as st
 
 from src.web.ai import call_google_text, get_google_api_key
+from src.web.ai.context_builder import BatteryDataContext
 
 
 def _build_pzu_summary() -> Optional[str]:
@@ -108,45 +116,119 @@ def _compose_prompt(user_question: str) -> str:
     return base_prompt
 
 
-def render_ai_insights() -> None:
-    """Render AI insights tab."""
-    section_title = "AI Insights (Beta)"
+def render_ai_insights(cfg: dict = None) -> None:
+    """Render AI insights tab with full data access."""
+    section_title = "🤖 AI Insights Assistant"
     st.header(section_title)
     st.caption(
-        "This assistant summarises the latest PZU, Frequency Regulation and financing analytics. "
-        "Run the individual modules first so the session state contains fresh data."
+        "This assistant has full access to FR/DAMAS activation data, PZU prices, revenue calculations, "
+        "and investment metrics. It uses Google Gemini 2.5 Flash for intelligent analysis."
     )
 
-    default_question = (
-        "Provide an operational summary of the battery portfolio, including profitability, debt coverage, "
-        "and any risks or opportunities you identify."
-    )
-    question = st.text_area("AI question", value=default_question, height=120)
+    # Initialize session state
+    if "ai_chat_history" not in st.session_state:
+        st.session_state.ai_chat_history = []
 
+    # Check for API key
     api_key_available = True
     try:
-        # Test for key presence before the user hits the button so we can surface a clear warning.
         get_google_api_key()
     except RuntimeError as exc:
         api_key_available = False
-        st.warning(
+        st.error(
             f"{exc}\n\nAdd a `.streamlit/secrets.toml` with `GOOGLE_API_KEY = \"...\"` "
             "or export the `GOOGLE_API_KEY` environment variable to enable the assistant."
         )
 
-    if st.button("Generate AI Insight", disabled=not api_key_available, width="stretch"):
-        prompt = _compose_prompt(question)
-        with st.spinner("Contacting AI service..."):
-            try:
-                answer = call_google_text(prompt)
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"AI request failed: {exc}")
-            else:
-                st.markdown("---")
-                st.markdown("#### AI Response")
-                st.markdown(answer)
-    elif not api_key_available:
-        st.info("AI insights will remain disabled until a Google API key is configured.")
+    # Build comprehensive data context
+    with st.spinner("Loading all platform data..."):
+        context_builder = BatteryDataContext()
+        data_context = context_builder.get_full_context(cfg)
+        context_prompt = context_builder.format_for_llm(data_context)
 
-    with st.expander("Prompt context preview", expanded=False):
-        st.code(_compose_prompt(question), language="markdown")
+    # Display data overview metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if data_context["fr_data"]["available"]:
+            st.metric("FR Data Points", f"{data_context['fr_data']['total_rows']:,}",
+                     data_context["fr_data"]["data_accuracy"])
+        else:
+            st.metric("FR Data", "Not Available", "❌")
+
+    with col2:
+        if data_context["pzu_data"]["available"]:
+            st.metric("PZU Data Points", f"{data_context['pzu_data']['total_rows']:,}", "Historical")
+        else:
+            st.metric("PZU Data", "Not Available", "❌")
+
+    with col3:
+        if data_context["fr_data"].get("activation_stats"):
+            rate = data_context["fr_data"]["activation_stats"]["afrr_up"]["activation_rate"]
+            st.metric("aFRR Activation", f"{rate:.1%}", "of time slots")
+        else:
+            st.metric("Activation Rate", "N/A", "")
+
+    with col4:
+        quality = data_context["data_quality"]["overall_quality"]
+        st.metric("Data Quality", quality, "✅" if quality == "Excellent" else "⚠️")
+
+    # Display data context
+    with st.expander("📊 Available Data Context", expanded=False):
+        st.code(json.dumps(data_context, indent=2, default=str)[:3000] + "...", language="json")
+
+    # Chat history display
+    for message in st.session_state.ai_chat_history:
+        if message["role"] == "user":
+            st.info(f"👤 **You:** {message['content']}")
+        else:
+            st.success(f"🤖 **AI:** {message['content']}")
+
+    # Question input
+    question = st.text_area(
+        "Ask anything about battery data:",
+        value="What's the FR activation revenue for January 2024? Compare it with PZU potential.",
+        height=80
+    )
+
+    # Example questions
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📊 FR Revenue Analysis"):
+            question = "Analyze FR revenue breakdown for 2024 with capacity vs activation split"
+    with col2:
+        if st.button("💰 PZU vs FR Comparison"):
+            question = "Compare annual revenue potential between FR and PZU strategies"
+
+    if st.button("🚀 Generate AI Insight", disabled=not api_key_available, type="primary", use_container_width=True):
+        if question:
+            # Add to chat history
+            st.session_state.ai_chat_history.append({"role": "user", "content": question})
+
+            # Create comprehensive prompt
+            full_prompt = f"""{context_prompt}
+
+User Question: {question}
+
+Instructions:
+1. Use specific numbers from the data context above
+2. Show calculations where relevant
+3. Cite data sources (FR/DAMAS, PZU, etc.)
+4. Be precise and data-driven
+5. Format with clear sections"""
+
+            with st.spinner("🤔 Analyzing data with Gemini 2.5 Flash..."):
+                try:
+                    answer = call_google_text(prompt=full_prompt, temperature=0.3, max_tokens=1024)
+                    st.session_state.ai_chat_history.append({"role": "assistant", "content": answer})
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"AI request failed: {exc}")
+
+    # Clear chat
+    if st.button("🗑️ Clear Chat"):
+        st.session_state.ai_chat_history = []
+        st.rerun()
+
+    # Show prompt preview
+    with st.expander("🔍 Full Data Context & Prompt", expanded=False):
+        st.code(context_prompt, language="markdown")

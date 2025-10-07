@@ -61,11 +61,11 @@ page_header(
 view = st.radio(
     "Navigation",
     options=[
-        "AI Insights",
         "PZU Horizons",
         "FR Simulator",
         "Market Comparison",
         "Investment & Financing",
+        "AI Insights",
     ],
     horizontal=True,
     label_visibility="collapsed"
@@ -222,3 +222,6 @@ elif view == "Market Comparison":
 
 elif view == "Investment & Financing":
     render_investment_financing_analysis(cfg)
+
+elif view == "AI Insights":
+    render_ai_insights(cfg)
