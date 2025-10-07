@@ -1,4 +1,4 @@
-"""Utility functions for calling Google Generative Language models."""
+"""Utility functions for calling Google Generative Language (Gemini) models."""
 
 from __future__ import annotations
 
@@ -10,8 +10,10 @@ import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
 # Default model/version – adjust if you want to target a different endpoint.
-GENAI_MODEL = "models/text-bison-001"
-GENAI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/{GENAI_MODEL}:generateText"
+GENAI_MODEL = "models/gemini-1.5-flash-latest"
+GENAI_ENDPOINT = (
+    f"https://generativelanguage.googleapis.com/v1beta/{GENAI_MODEL}:generateContent"
+)
 
 
 def get_google_api_key() -> str:
@@ -49,20 +51,22 @@ def get_google_api_key() -> str:
         return env_key
 
     raise RuntimeError(
-        "Google API key not found. Set GOOGLE_API_KEY in Streamlit secrets or the environment."
+        "Google Gemini API key not found. Set GOOGLE_API_KEY in Streamlit secrets or the environment."
     )
 
 
-def call_google_text(prompt: str, *, temperature: float = 0.3, max_tokens: int = 512) -> str:
+def call_google_text(
+    prompt: str, *, temperature: float = 0.3, max_tokens: int = 512
+) -> str:
     """
-    Call the Google Generative Language API with the supplied prompt.
+    Call the Google Gemini API with the supplied prompt.
 
     Parameters
     ----------
     prompt : str
         Prompt text to send to the model.
     temperature : float, optional
-        Sampling temperature.
+        Sampling temperature (0.0–1.0).
     max_tokens : int, optional
         Maximum number of tokens in the response.
 
@@ -81,9 +85,11 @@ def call_google_text(prompt: str, *, temperature: float = 0.3, max_tokens: int =
     api_key = get_google_api_key()
 
     payload = {
-        "prompt": {"text": prompt},
-        "temperature": temperature,
-        "maxOutputTokens": max_tokens,
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        },
     }
     response = requests.post(
         f"{GENAI_ENDPOINT}?key={api_key}",
@@ -97,4 +103,13 @@ def call_google_text(prompt: str, *, temperature: float = 0.3, max_tokens: int =
     if not candidates:
         raise RuntimeError("No response candidates returned by the model.")
 
-    return candidates[0].get("output", "").strip()
+    first = candidates[0]
+    content = first.get("content") or {}
+    parts = content.get("parts") or []
+    if not parts:
+        raise RuntimeError("Model response did not include text content.")
+
+    text = parts[0].get("text", "")
+    if not text:
+        raise RuntimeError("Model response text was empty.")
+    return text.strip()
