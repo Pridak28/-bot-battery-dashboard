@@ -23,6 +23,7 @@ matplotlib.use('Agg')
 from src.data.data_provider import DataProvider
 from src.web.data import load_config
 from src.web.ui import (
+    render_battery_assistant,
     render_frequency_regulation_simulator,
     render_historical_market_comparison,
     render_investment_financing_analysis,
@@ -60,6 +61,7 @@ page_header(
 view = st.radio(
     "",
     options=[
+        "🤖 AI Assistant",
         "PZU Horizons",
         "FR Simulator",
         "Market Comparison",
@@ -217,3 +219,6 @@ elif view == "Market Comparison":
 
 elif view == "Investment & Financing":
     render_investment_financing_analysis(cfg)
+
+elif view == "🤖 AI Assistant":
+    render_battery_assistant(cfg)
