@@ -9,8 +9,12 @@ import requests
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
-# Default model/version – adjust if you want to target a different endpoint.
-GENAI_MODEL = "models/gemini-1.5-flash-latest"
+# Default model/version – adjust via GOOGLE_GENAI_MODEL env if needed.
+_model_name = os.environ.get("GOOGLE_GENAI_MODEL", "gemini-1.5-flash")
+if not _model_name.startswith("models/"):
+    _model_name = f"models/{_model_name}"
+
+GENAI_MODEL = _model_name
 GENAI_ENDPOINT = (
     f"https://generativelanguage.googleapis.com/v1beta/{GENAI_MODEL}:generateContent"
 )
