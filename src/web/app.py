@@ -59,7 +59,7 @@ page_header(
 # ============================================================================
 
 view = st.radio(
-    "",
+    "Navigation",
     options=[
         "AI Insights",
         "PZU Horizons",

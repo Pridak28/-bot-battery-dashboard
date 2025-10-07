@@ -439,6 +439,29 @@ def require_data_file(filename: str, *, description: Optional[str] = None) -> Pa
     st.stop()
 
 
+def require_any_data_file(
+    filenames: List[str],
+    *,
+    description: Optional[str] = None,
+) -> Path:
+    """
+    Return the first data/<filename> that exists. If none of the provided names exist,
+    display a helpful error message and halt execution.
+    """
+    tried: List[Path] = []
+    for name in filenames:
+        path = project_root / "data" / name
+        tried.append(path)
+        if path.exists():
+            return path
+
+    message = "None of the required data files were found:\n" + "\n".join(f"- {p}" for p in tried)
+    if description:
+        message += f"\n{description}"
+    else:
+        message += "\nAdd one of these files to the repository or update configuration."
+    st.error(message)
+    st.stop()
 @st.cache_data(show_spinner=False)
 def parse_battery_specs_from_document(path: str) -> Dict[str, Optional[float]]:
     """Parse a document for headline battery specifications."""

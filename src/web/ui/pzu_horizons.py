@@ -302,7 +302,7 @@ def render_pzu_horizons(
                     })
 
             if display_windows:
-                st.dataframe(pd.DataFrame(display_windows), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(display_windows), width='stretch', hide_index=True)
 
     with tab3:
         st.markdown("### Daily Trading Results")
@@ -318,14 +318,14 @@ def render_pzu_horizons(
 
             # Show sample data
             if show_raw_tables:
-                st.dataframe(daily_hist.tail(30), use_container_width=True)
+                st.dataframe(daily_hist.tail(30), width='stretch')
             else:
                 display_daily = daily_hist.tail(30).copy()
                 display_daily["date"] = display_daily["date"].dt.strftime("%Y-%m-%d")
                 display_daily["daily_profit_eur"] = display_daily["daily_profit_eur"].apply(
                     lambda x: format_currency(x, decimals=0, thousands=thousands_sep)
                 )
-                st.dataframe(display_daily[["date", "daily_profit_eur", "daily_revenue_eur", "daily_cost_eur"]], use_container_width=True, hide_index=True)
+                st.dataframe(display_daily[["date", "daily_profit_eur", "daily_revenue_eur", "daily_cost_eur"]], width='stretch', hide_index=True)
 
     # ========================================================================
     # SECTION 4: ROI & INVESTMENT ANALYSIS
@@ -483,7 +483,7 @@ def render_pzu_horizons(
     with pred_cols[2]:
         st.write("")
         st.write("")
-        run_prediction = st.button("🚀 Generate Predictions", type="primary", use_container_width=True)
+        run_prediction = st.button("🚀 Generate Predictions", type="primary", width='stretch')
 
     with pred_cols[3]:
         st.write("")
@@ -655,7 +655,7 @@ def render_pzu_horizons(
                     st.dataframe(
                         display_pred[['date', 'predicted_profit_eur', 'predicted_revenue_eur', 'predicted_energy_mwh',
                                      'predicted_buy_price_eur_mwh', 'predicted_sell_price_eur_mwh', 'predicted_spread_eur_mwh', 'confidence']],
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True
                     )
 

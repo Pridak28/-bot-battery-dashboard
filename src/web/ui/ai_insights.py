@@ -130,7 +130,7 @@ def render_ai_insights() -> None:
         st.warning(str(exc))
         st.stop()
 
-    if st.button("Generate AI Insight", use_container_width=True):
+    if st.button("Generate AI Insight", width="stretch"):
         prompt = _compose_prompt(question)
         with st.spinner("Contacting AI service..."):
             try:

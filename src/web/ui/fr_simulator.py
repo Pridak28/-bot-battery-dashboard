@@ -80,36 +80,21 @@ def render_frequency_regulation_simulator(
     sample_sysimb = project_root / "data" / "Estimated power system imbalance.xlsx"
 
     # PRIORITY 1: DAMAS-enriched CSV (has aFRR/mFRR actual activation data)
-    imbalance_history_csv = require_data_file(
-        "imbalance_history.csv",
-        description="needed for FR Simulator defaults",
+    imbalance_history_csv = require_any_data_file(
+        [
+            "imbalance_history.csv",
+            "imbalance_history_1y.csv",
+            "imbalance_history_2y.csv",
+            "imbalance_history_3y.csv",
+        ],
+        description="Provide a DAMAS-enhanced imbalance history CSV in the data/ folder.",
     )
     corrected_imbalance = project_root / "data" / "imbalance_history_corrected.csv"
 
     default_export8 = (
-        str(imbalance_history_csv)  # FIRST: Check for DAMAS CSV with actual activation data
+        str(imbalance_history_csv)
         if imbalance_history_csv.exists()
-        else (
-            str(corrected_imbalance)
-            if corrected_imbalance.exists()
-            else (
-                "export-8.xlsx"
-                if Path("export-8.xlsx").exists()
-                else (
-                    "downloads/transelectrica_imbalance/export-8.xlsx"
-                    if Path("downloads/transelectrica_imbalance/export-8.xlsx").exists()
-                    else (str(sample_export8) if sample_export8.exists() else (
-                        find_in_data_dir([
-                            r"export-8\\.xlsx",
-                            r"export_8\\.xlsx",
-                            r"estimated.*price.*xlsx",
-                            r"price.*imbalance.*xlsx",
-                        ])
-                        or ""
-                    ))
-                )
-            )
-        )
+        else ""
     )
     colx1, colx2 = st.columns([2, 1])
     with colx1:
@@ -722,7 +707,7 @@ def render_frequency_regulation_simulator(
                                     'Percentage': '{:.1f}%'
                                 }),
                                 hide_index=True,
-                                use_container_width=True
+                                width='stretch'
                             )
 
                         with chart_col2:
@@ -736,7 +721,7 @@ def render_frequency_regulation_simulator(
                             else:
                                 st.line_chart(
                                     trends_to_plot,
-                                    use_container_width=True
+                                    width='stretch'
                                 )
 
                         # Detailed monthly data in collapsible section
@@ -1125,7 +1110,7 @@ def render_frequency_regulation_simulator(
                             'Operating Cost (EUR)': '{:,.2f}',
                             'Net Profit (EUR)': '{:,.2f}',
                         }),
-                        use_container_width=True,
+                        width='stretch',
                         height=400
                     )
 
