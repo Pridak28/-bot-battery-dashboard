@@ -1,0 +1,808 @@
+/* ============================================================================
+   BATTERY ANALYTICS PLATFORM - BLOOMBERG TERMINAL INSPIRED
+   Professional Financial Technology Interface - LIGHT THEME
+   ============================================================================ */
+
+/* ============================================================================
+   ROOT VARIABLES - ORIGINAL BLUE COLOR SYSTEM (UNCHANGED)
+   ============================================================================ */
+:root {
+    /* PRIMARY BRAND - Original Blue Palette (EXACT SAME) */
+    --brand-primary: #1d4ed8;
+    --brand-primary-light: #3b82f6;
+    --brand-primary-dark: #153ba8;
+    --brand-accent: #0ea5e9;
+    --brand-gradient: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%);
+
+    /* BACKGROUNDS - ORIGINAL LIGHT THEME (UNCHANGED) */
+    --bg-main: #f5f7fb;
+    --bg-main-secondary: #f5f7fb;
+    --bg-card: #ffffff;
+    --bg-card-alt: #f9fbff;
+    --bg-sidebar: #ffffff;
+    --bg-input: #ffffff;
+    --bg-header: #ffffff;
+
+    /* TEXT COLORS - ORIGINAL (UNCHANGED) */
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-tertiary: #64748b;
+    --text-on-dark: #ffffff;
+
+    /* BORDERS - ORIGINAL (UNCHANGED) */
+    --border-light: #e2e8f0;
+    --border-medium: #cbd5e1;
+    --border-dark: #94a3b8;
+
+    /* STATUS COLORS - ORIGINAL (UNCHANGED) */
+    --color-success: #16a34a;
+    --color-success-bg: #dcfce7;
+    --color-warning: #f59e0b;
+    --color-warning-bg: #fef3c7;
+    --color-error: #ef4444;
+    --color-error-bg: #fee2e2;
+    --color-info: #0ea5e9;
+    --color-info-bg: #e0f2fe;
+
+    /* SHADOWS - Enhanced for complexity */
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.1);
+    --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.15);
+    --shadow-lg: 0 12px 24px rgba(15, 23, 42, 0.2);
+    --shadow-xl: 0 20px 40px rgba(15, 23, 42, 0.25);
+
+    --accent-soft: rgba(37, 99, 235, 0.12);
+    --accent-border: rgba(37, 99, 235, 0.35);
+    --accent-soft-green: rgba(16, 185, 129, 0.14);
+
+    /* SPACING - Increased for better breathing room */
+    --space-xs: 0.75rem;
+    --space-sm: 1rem;
+    --space-md: 1.5rem;
+    --space-lg: 2rem;
+    --space-xl: 3rem;
+
+    /* RADIUS */
+    --radius-sm: 0.4rem;
+    --radius-md: 0.6rem;
+    --radius-lg: 1rem;
+}
+
+/* ============================================================================
+   GLOBAL RESETS & BASE
+   ============================================================================ */
+
+/* Remove Streamlit branding */
+#MainMenu {visibility: hidden !important;}
+footer {visibility: hidden !important;}
+header {visibility: hidden !important;}
+
+/* Original background */
+body {
+    background: var(--bg-main) !important;
+    color: var(--text-primary) !important;
+}
+
+.stApp {
+    background: var(--bg-main) !important;
+}
+
+/* Main content area - More spacing */
+.main .block-container {
+    max-width: 1600px !important;
+    padding: 3rem 2.5rem 4rem !important;
+}
+
+/* ============================================================================
+   TYPOGRAPHY - PROFESSIONAL MONOSPACE
+   ============================================================================ */
+
+/* Import both fonts */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+/* Use IBM Plex Mono for terminal/data look */
+* {
+    font-family: 'IBM Plex Mono', 'Consolas', 'Monaco', monospace !important;
+    text-rendering: optimizeLegibility !important;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.025em !important;
+}
+
+h1 {
+    font-size: 2.25rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+}
+
+h2 {
+    font-size: 1.875rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.03em !important;
+}
+
+h3 {
+    font-size: 1.5rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.02em !important;
+}
+
+/* Body text */
+body, div, p, span, label, li {
+    color: var(--text-secondary) !important;
+}
+
+strong, b {
+    color: var(--text-primary) !important;
+}
+
+a {
+    color: var(--brand-primary) !important;
+}
+
+/* ============================================================================
+   SIDEBAR - ENHANCED PROFESSIONAL PANEL
+   ============================================================================ */
+
+[data-testid="stSidebar"] {
+    background: var(--bg-sidebar) !important;
+    border-right: 2px solid var(--brand-accent) !important;
+    box-shadow: 4px 0 20px rgba(29, 78, 216, 0.1) !important;
+    color: var(--text-secondary) !important;
+}
+
+[data-testid="stSidebar"] * {
+    color: var(--text-secondary) !important;
+}
+
+/* Sidebar inputs */
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] select,
+[data-testid="stSidebar"] textarea {
+    background-color: var(--bg-input) !important;
+    border: 1px solid var(--border-medium) !important;
+    color: var(--text-primary) !important;
+}
+
+[data-testid="stSidebar"] label {
+    color: var(--text-secondary) !important;
+    font-weight: 600 !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+}
+
+/* ============================================================================
+   BUTTONS - ENHANCED PROFESSIONAL STYLE
+   ============================================================================ */
+
+.stButton > button {
+    background: linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light)) !important;
+    color: #ffffff !important;
+    border: 2px solid var(--brand-primary) !important;
+    border-radius: var(--radius-md) !important;
+    padding: 0.875rem 2rem !important;
+    margin: 1rem 0 !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.25), 0 0 0 0 rgba(29, 78, 216, 0.5) !important;
+    font-size: 0.8125rem !important;
+}
+
+.stButton > button:hover {
+    background: linear-gradient(135deg, var(--brand-primary-light), var(--brand-accent)) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 20px rgba(29, 78, 216, 0.35), 0 0 20px rgba(14, 165, 233, 0.3) !important;
+}
+
+.stButton > button:active {
+    transform: translateY(0) !important;
+}
+
+/* ============================================================================
+   INPUTS & FORMS - ENHANCED PROFESSIONAL FIELDS
+   ============================================================================ */
+
+/* Text inputs - More spacing */
+.stTextInput input,
+.stNumberInput input,
+.stTextArea textarea {
+    background: var(--bg-input) !important;
+    border: 2px solid var(--border-medium) !important;
+    border-radius: var(--radius-md) !important;
+    color: var(--text-primary) !important;
+    padding: 0.75rem 1rem !important;
+    margin-bottom: 1.25rem !important;
+    box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.05) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stTextInput input:focus,
+.stNumberInput input:focus,
+.stTextArea textarea:focus {
+    border-color: var(--brand-accent) !important;
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15), inset 0 2px 4px rgba(15, 23, 42, 0.05) !important;
+    outline: none !important;
+}
+
+/* Select boxes */
+.stSelectbox select {
+    background-color: var(--bg-input) !important;
+    border: 2px solid var(--border-medium) !important;
+    border-radius: var(--radius-md) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Number input spin buttons - professional arrow buttons */
+.stNumberInput button {
+    background-color: var(--bg-input) !important;
+    border: 2px solid var(--border-medium) !important;
+    border-radius: var(--radius-sm) !important;
+    width: 2.25rem !important;
+    height: 2.25rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin-left: 0.35rem !important;
+    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.08) !important;
+    transition: all 0.2s ease !important;
+    position: relative !important;
+    overflow: hidden !important;
+}
+
+/* Hide all text content inside number input buttons */
+.stNumberInput button * {
+    font-size: 0 !important;
+    color: transparent !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    opacity: 0 !important;
+}
+
+.stNumberInput button:hover {
+    background-color: var(--accent-soft) !important;
+    border-color: var(--brand-primary) !important;
+    box-shadow: 0 4px 8px rgba(29, 78, 216, 0.15) !important;
+}
+
+.stNumberInput button:active {
+    background-color: rgba(29, 78, 216, 0.18) !important;
+    transform: scale(0.95) !important;
+}
+
+.stNumberInput button:focus {
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.2) !important;
+}
+
+/* Arrow icons using ::before pseudo-element */
+.stNumberInput button::before {
+    content: "";
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    width: 0 !important;
+    height: 0 !important;
+    border-style: solid !important;
+    border-color: transparent !important;
+}
+
+/* Up arrow - increase button (first button) */
+.stNumberInput button:first-of-type::before,
+.stNumberInput button[aria-label*="increase" i]::before,
+.stNumberInput button[title*="increase" i]::before,
+.stNumberInput button[aria-label*="Increment" i]::before {
+    border-width: 0 5px 7px 5px !important;
+    border-bottom-color: var(--brand-primary) !important;
+}
+
+/* Down arrow - decrease button (last button) */
+.stNumberInput button:last-of-type::before,
+.stNumberInput button[aria-label*="decrease" i]::before,
+.stNumberInput button[title*="decrease" i]::before,
+.stNumberInput button[aria-label*="Decrement" i]::before {
+    border-width: 7px 5px 0 5px !important;
+    border-top-color: var(--brand-primary) !important;
+}
+
+/* Input labels */
+.stTextInput label,
+.stNumberInput label,
+.stSelectbox label,
+.stTextArea label {
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    margin-bottom: 0.375rem !important;
+}
+
+/* ============================================================================
+   RADIO BUTTONS & TABS - PROFESSIONAL NAVIGATION
+   ============================================================================ */
+
+/* Radio buttons - More spacing */
+.stRadio > div {
+    flex-direction: row !important;
+    gap: 1.25rem !important;
+}
+
+.stRadio label {
+    background: var(--bg-card-alt) !important;
+    border: 2px solid var(--border-medium) !important;
+    border-radius: var(--radius-md) !important;
+    padding: 0.625rem 1.5rem !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.05) !important;
+    font-size: 0.8125rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+}
+
+.stRadio label:hover {
+    border-color: var(--brand-accent) !important;
+    background: var(--accent-soft) !important;
+    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.15) !important;
+}
+
+/* Tabs - More spacing */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.75rem !important;
+    border: none !important;
+    background: #e8eef9 !important;
+    padding: 0.875rem !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.08) !important;
+    margin-bottom: 2rem !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    background-color: transparent !important;
+    border: 2px solid transparent !important;
+    color: var(--text-secondary) !important;
+    padding: 0.625rem 1.5rem !important;
+    font-weight: 700 !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    border-radius: var(--radius-sm) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+    border-color: transparent !important;
+    color: var(--text-primary) !important;
+    background: rgba(255, 255, 255, 0.5) !important;
+}
+
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, var(--brand-primary), var(--brand-primary-light)) !important;
+    border-color: transparent !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.25) !important;
+}
+
+/* ============================================================================
+   METRICS - ENHANCED PROFESSIONAL DATA CARDS
+   ============================================================================ */
+
+[data-testid="stMetric"] {
+    background: var(--bg-card) !important;
+    border: 2px solid var(--border-light) !important;
+    border-left: 4px solid var(--brand-accent) !important;
+    border-radius: var(--radius-md) !important;
+    padding: 1.5rem 1.75rem !important;
+    margin-bottom: 1.5rem !important;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(37, 99, 235, 0.05) !important;
+    transition: all 0.3s ease !important;
+}
+
+[data-testid="stMetric"]:hover {
+    border-left-color: var(--brand-primary) !important;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.15), 0 0 20px rgba(29, 78, 216, 0.1) !important;
+    transform: translateY(-3px) !important;
+}
+
+[data-testid="stMetricLabel"] {
+    color: var(--text-tertiary) !important;
+    font-size: 0.6875rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.12em !important;
+}
+
+[data-testid="stMetricValue"] {
+    color: var(--text-primary) !important;
+    font-size: 1.875rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.025em !important;
+}
+
+[data-testid="stMetricDelta"] {
+    color: var(--brand-primary) !important;
+    font-size: 0.875rem !important;
+}
+
+/* ============================================================================
+   ALERTS - PROFESSIONAL STATUS MESSAGES
+   ============================================================================ */
+
+.stAlert[data-baseweb="notification"] {
+    border-radius: var(--radius-md) !important;
+    border-left-width: 4px !important;
+    padding: 1.125rem 1.5rem !important;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Success */
+div[data-baseweb="notification"][kind="success"],
+.stSuccess {
+    background: rgba(22, 163, 74, 0.08) !important;
+    border-left-color: var(--color-success) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Error */
+div[data-baseweb="notification"][kind="error"],
+.stError {
+    background: rgba(239, 68, 68, 0.08) !important;
+    border-left-color: var(--color-error) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Warning */
+div[data-baseweb="notification"][kind="warning"],
+.stWarning {
+    background: rgba(245, 158, 11, 0.08) !important;
+    border-left-color: var(--color-warning) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Info */
+div[data-baseweb="notification"][kind="info"],
+.stInfo {
+    background: rgba(56, 189, 248, 0.08) !important;
+    border-left-color: var(--color-info) !important;
+    color: var(--text-primary) !important;
+}
+
+/* ============================================================================
+   EXPANDERS - PROFESSIONAL COLLAPSIBLE SECTIONS
+   ============================================================================ */
+
+.streamlit-expanderHeader {
+    background: var(--bg-card) !important;
+    border: 2px solid var(--border-light) !important;
+    border-radius: var(--radius-md) !important;
+    color: var(--text-primary) !important;
+    font-weight: 700 !important;
+    font-size: 0.875rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    padding: 0.875rem 1.25rem !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+    transition: all 0.2s ease !important;
+}
+
+.streamlit-expanderHeader:hover {
+    background: var(--bg-card-alt) !important;
+    border-color: var(--brand-accent) !important;
+    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.15) !important;
+}
+
+[data-testid="stExpander"] details > summary {
+    list-style: none;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.625rem !important;
+}
+
+[data-testid="stExpander"] details > summary::-webkit-details-marker {
+    display: none;
+}
+
+[data-testid="stExpander"] summary span[data-testid="stIconMaterial"],
+[data-testid="stExpander"] button span[data-testid="stIconMaterial"] {
+    display: none !important;
+}
+
+.streamlit-expanderHeader::before,
+[data-testid="stExpander"] details > summary::before {
+    content: '▶';
+    color: var(--brand-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+    margin-right: 0.5rem;
+}
+
+[data-testid="stExpander"] details[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+[data-testid="stExpanderDetails"] {
+    margin-top: 0.5rem !important;
+    padding: 1.25rem !important;
+    background: var(--bg-card-alt) !important;
+    border: 2px solid var(--border-light) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.05) !important;
+}
+
+/* ============================================================================
+   DATAFRAMES & TABLES - PROFESSIONAL DATA GRIDS
+   ============================================================================ */
+
+[data-testid="stDataFrame"],
+.stDataFrame {
+    border: 2px solid var(--border-light) !important;
+    border-radius: var(--radius-md) !important;
+    overflow: hidden !important;
+    background: var(--bg-card) !important;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Table headers */
+[data-testid="stDataFrame"] th {
+    background: linear-gradient(135deg, #eff4fb 0%, #e8eef9 100%) !important;
+    color: var(--brand-primary) !important;
+    font-weight: 700 !important;
+    font-size: 0.6875rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.12em !important;
+    border-bottom: 3px solid var(--brand-accent) !important;
+    padding: 1rem !important;
+}
+
+/* Table cells */
+[data-testid="stDataFrame"] td {
+    color: var(--text-secondary) !important;
+    border-bottom: 1px solid var(--border-light) !important;
+    padding: 0.875rem !important;
+    background: var(--bg-card) !important;
+}
+
+[data-testid="stDataFrame"] tr:hover td {
+    background: var(--bg-card-alt) !important;
+}
+
+/* ============================================================================
+   CUSTOM COMPONENTS - PROFESSIONAL WIDGETS
+   ============================================================================ */
+
+/* Main header with gradient */
+.main-header {
+    background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%) !important;
+    border: 3px solid var(--brand-accent) !important;
+    border-radius: var(--radius-lg) !important;
+    padding: 2.5rem 3rem !important;
+    margin-bottom: 2.5rem !important;
+    box-shadow: 0 12px 32px rgba(29, 78, 216, 0.15), 0 0 0 1px rgba(37, 99, 235, 0.1) !important;
+    position: relative !important;
+}
+
+.main-header::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--brand-gradient);
+}
+
+.main-header h1 {
+    color: var(--brand-primary) !important;
+    margin: 0 !important;
+}
+
+.main-header p {
+    color: var(--text-secondary) !important;
+    margin: 0.75rem 0 0 0 !important;
+    font-size: 0.9375rem !important;
+}
+
+/* Section headers with accent - More spacing */
+.section-header {
+    color: var(--brand-primary) !important;
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+    margin: 3rem 0 2rem 0 !important;
+    padding: 1.125rem 1.5rem !important;
+    display: flex !important;
+    align-items: center !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+    background: var(--bg-card) !important;
+    border-left: 4px solid var(--brand-accent) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
+}
+
+.section-header::before {
+    content: '■' !important;
+    color: var(--brand-accent) !important;
+    margin-right: 0.875rem !important;
+    font-size: 1rem !important;
+}
+
+/* KPI Cards - Professional data panels with more spacing */
+.kpi-card {
+    background: var(--bg-card) !important;
+    border: 2px solid var(--border-light) !important;
+    border-left: 4px solid var(--brand-accent) !important;
+    border-radius: var(--radius-md) !important;
+    padding: 1.75rem 2rem !important;
+    margin-bottom: 1.5rem !important;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(37, 99, 235, 0.05) !important;
+    transition: all 0.3s ease !important;
+}
+
+.kpi-card:hover {
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.15), 0 0 20px rgba(29, 78, 216, 0.1) !important;
+    transform: translateY(-4px) !important;
+    border-left-color: var(--brand-primary) !important;
+    border-left-width: 5px !important;
+}
+
+.kpi-label {
+    color: var(--text-tertiary) !important;
+    font-size: 0.6875rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.12em !important;
+    margin-bottom: 0.625rem !important;
+}
+
+.kpi-value {
+    color: var(--text-primary) !important;
+    font-size: 2.25rem !important;
+    font-weight: 700 !important;
+    margin: 0.625rem 0 !important;
+}
+
+.kpi-delta {
+    color: var(--brand-primary) !important;
+    font-size: 0.875rem !important;
+    font-weight: 600 !important;
+}
+
+/* Info banners */
+.info-banner {
+    background: var(--color-info-bg) !important;
+    border-left: 4px solid var(--color-info) !important;
+    padding: 1.125rem 1.5rem !important;
+    border-radius: var(--radius-md) !important;
+    margin: 1rem 0 !important;
+    color: var(--text-secondary) !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+}
+
+.success-banner {
+    background: var(--color-success-bg) !important;
+    border-left: 4px solid var(--color-success) !important;
+    padding: 1.125rem 1.5rem !important;
+    border-radius: var(--radius-md) !important;
+    margin: 1rem 0 !important;
+    color: var(--text-secondary) !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+}
+
+.warning-banner {
+    background: var(--color-warning-bg) !important;
+    border-left: 4px solid var(--color-warning) !important;
+    padding: 1.125rem 1.5rem !important;
+    border-radius: var(--radius-md) !important;
+    margin: 1rem 0 !important;
+    color: var(--text-secondary) !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+}
+
+.error-banner {
+    background: var(--color-error-bg) !important;
+    border-left: 4px solid var(--color-error) !important;
+    padding: 1.125rem 1.5rem !important;
+    border-radius: var(--radius-md) !important;
+    margin: 1rem 0 !important;
+    color: var(--text-secondary) !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Grid layouts - Increased spacing between elements */
+.grid-2 {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 2rem !important;
+    margin: 2rem 0 !important;
+}
+
+.grid-3 {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 2rem !important;
+    margin: 2rem 0 !important;
+}
+
+.grid-4 {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 2rem !important;
+    margin: 2rem 0 !important;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+@media (max-width: 1200px) {
+    .grid-4 {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .grid-4,
+    .grid-3 {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+
+    .main .block-container {
+        padding: 1rem !important;
+    }
+}
+
+@media (max-width: 640px) {
+    .grid-4,
+    .grid-3,
+    .grid-2 {
+        grid-template-columns: 1fr !important;
+    }
+
+    .main-header {
+        padding: 1.5rem !important;
+    }
+}
+
+/* ============================================================================
+   UTILITY CLASSES
+   ============================================================================ */
+
+.text-center { text-align: center !important; }
+.text-right { text-align: right !important; }
+.font-bold { font-weight: 700 !important; }
+.font-semibold { font-weight: 600 !important; }
+.text-sm { font-size: 0.875rem !important; }
+.text-xs { font-size: 0.75rem !important; }
+
+/* Margin utilities */
+.mt-0 { margin-top: 0 !important; }
+.mt-1 { margin-top: 0.5rem !important; }
+.mt-2 { margin-top: 1rem !important; }
+.mt-3 { margin-top: 1.5rem !important; }
+.mt-4 { margin-top: 2rem !important; }
+
+.mb-0 { margin-bottom: 0 !important; }
+.mb-1 { margin-bottom: 0.5rem !important; }
+.mb-2 { margin-bottom: 1rem !important; }
+.mb-3 { margin-bottom: 1.5rem !important; }
+.mb-4 { margin-bottom: 2rem !important; }
+
+/* Padding utilities */
+.p-0 { padding: 0 !important; }
+.p-1 { padding: 0.5rem !important; }
+.p-2 { padding: 1rem !important; }
+.p-3 { padding: 1.5rem !important; }
+.p-4 { padding: 2rem !important; }

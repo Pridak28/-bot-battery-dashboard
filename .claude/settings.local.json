@@ -2,7 +2,22 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "WebSearch",
+      "WebFetch(domain:www.transelectrica.ro)",
+      "WebFetch(domain:energyworld.ro)",
+      "Read(//Users/seversilaghi/Documents/**)",
+      "Bash(cd:*)",
+      "Bash(python3:*)",
+      "Bash(1)",
+      "Bash(cat:*)",
+      "Bash(awk:*)",
+      "Bash(git checkout:*)",
+      "Read(//private/tmp/**)",
+      "Bash(streamlit run:*)",
+      "Bash(pkill:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)"
     ],
     "deny": [],
     "ask": []

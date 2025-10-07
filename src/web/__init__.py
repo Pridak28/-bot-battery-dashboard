@@ -1,5 +1,7 @@
-"""Expose Streamlit app module when importing src.web."""
+"""Web application package.
 
-from . import app as app  # re-export for `from src.web import app`
+Note: Do not import app.py here as it contains Streamlit module-level code.
+Import it explicitly when needed: `from src.web import app` or `import src.web.app`
+"""
 
-__all__ = ["app"]
+__all__ = []

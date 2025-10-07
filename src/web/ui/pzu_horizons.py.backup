@@ -1,0 +1,891 @@
+from __future__ import annotations
+
+from datetime import date
+from typing import List, Optional, Tuple
+
+import inspect
+
+import pandas as pd
+import streamlit as st
+from matplotlib import pyplot as plt
+
+from src.data.data_provider import DataProvider
+from src.web.analysis import (
+    analyze_historical_monthly_trends_only,
+    analyze_pzu_best_hours_min_years,
+    plan_multi_hour_strategy_from_history,
+    enrich_cycle_stats,
+    build_cash_flow_summary,
+    calculate_historical_roi_metrics,
+)
+from src.web.utils import sanitize_session_value, safe_session_state_update, safe_pyplot_figure
+from src.web.utils.formatting import (
+    format_currency,
+    format_percent,
+    format_price_per_mwh,
+    get_chart_colors,
+    get_status_indicator,
+)
+
+try:
+    from src.strategy.horizon import (
+        compute_best_fixed_cycle,
+        load_pzu_daily_history,
+        load_pzu_price_series,
+        summarize_profit_windows,
+    )
+except ImportError:  # pragma: no cover - fallback when horizon module partially available
+    from src.strategy.horizon import (  # type: ignore
+        compute_best_fixed_cycle,
+        load_pzu_daily_history,
+        summarize_profit_windows,
+    )
+
+    def load_pzu_price_series(*_args, **_kwargs):  # type: ignore
+        return pd.DataFrame(columns=["date", "avg_price_eur_mwh"])
+
+
+def render_pzu_horizons(
+    *,
+    cfg: dict,
+    provider: DataProvider,
+    history_start: Optional[pd.Timestamp],
+    history_end: Optional[pd.Timestamp],
+    earliest_available_ts: Optional[pd.Timestamp],
+    latest_available_ts: Optional[pd.Timestamp],
+    capacity_mwh: float,
+    power_mw: float,
+    eta_rt: float,
+    run_analysis: bool,
+    currency_decimals: int,
+    percent_decimals: int,
+    thousands_sep: bool,
+    show_raw_tables: bool,
+    enable_roi_trends: bool = False,
+) -> Tuple[float, float, Optional[pd.Timestamp], Optional[pd.Timestamp]]:
+    """Render the PZU profitability horizons view and return updated settings."""
+
+    st.subheader("PZU Profitability Horizons")
+
+    control_cols = st.columns(2)
+    capacity_mwh = control_cols[0].number_input(
+        "Capacity (MWh)",
+        min_value=1.0,
+        value=float(capacity_mwh),
+        step=1.0,
+        key="pzu_horizon_capacity",
+    )
+    power_mw = control_cols[1].number_input(
+        "Power (MW)",
+        min_value=0.1,
+        value=float(power_mw),
+        step=0.5,
+        key="pzu_horizon_power",
+    )
+
+    date_cols = st.columns(2)
+    start_default_ts = history_start or earliest_available_ts or pd.Timestamp(date.today())
+    end_default_ts = history_end or latest_available_ts or pd.Timestamp(date.today())
+    start_input = date_cols[0].date_input(
+        "Start date (inclusive)",
+        value=start_default_ts.to_pydatetime().date(),
+        min_value=(earliest_available_ts or start_default_ts).to_pydatetime().date(),
+        max_value=(latest_available_ts or end_default_ts).to_pydatetime().date(),
+        key="pzu_horizon_start",
+    )
+    end_input = date_cols[1].date_input(
+        "End date (inclusive)",
+        value=end_default_ts.to_pydatetime().date(),
+        min_value=start_input,
+        max_value=(latest_available_ts or end_default_ts).to_pydatetime().date(),
+        key="pzu_horizon_end",
+    )
+    history_start = pd.Timestamp(start_input)
+    history_end = pd.Timestamp(end_input)
+    if history_start > history_end:
+        st.warning("Start date is after end date; swapping them.")
+        history_start, history_end = history_end, history_start
+    if history_start is not None and history_end is not None:
+        st.caption(
+            f"Analysis window: {history_start.strftime('%Y-%m-%d')} → {history_end.strftime('%Y-%m-%d')}"
+        )
+    else:
+        st.caption("Analysis window: full available history")
+
+    daily_history = pd.DataFrame()
+
+    if run_analysis:
+        load_pzu_params = {
+            "pzu_csv": provider.pzu_csv,
+            "capacity_mwh": capacity_mwh,
+            "round_trip_efficiency": eta_rt,
+            "power_mw": power_mw,
+        }
+        sig_load = inspect.signature(load_pzu_daily_history)
+        if "start_date" in sig_load.parameters:
+            load_pzu_params["start_date"] = history_start
+        if "end_date" in sig_load.parameters:
+            load_pzu_params["end_date"] = history_end
+
+        daily_history = load_pzu_daily_history(**load_pzu_params)
+
+        fixed_params = {
+            "pzu_csv": provider.pzu_csv,
+            "capacity_mwh": capacity_mwh,
+            "power_mw": power_mw,
+            "round_trip_efficiency": eta_rt,
+        }
+        sig_fixed = inspect.signature(compute_best_fixed_cycle)
+        if "start_date" in sig_fixed.parameters:
+            fixed_params["start_date"] = history_start
+        if "end_date" in sig_fixed.parameters:
+            fixed_params["end_date"] = history_end
+
+        fixed_cycle = compute_best_fixed_cycle(**fixed_params)
+        fixed_history: pd.DataFrame = fixed_cycle.get("daily_history", pd.DataFrame())
+        fixed_summaries = summarize_profit_windows(fixed_history) if not fixed_history.empty else []
+
+        if fixed_history.empty:
+            st.info("No historical PZU data available at the configured path.")
+        else:
+            start_dt = fixed_history["date"].iloc[0]
+            end_dt = fixed_history["date"].iloc[-1]
+            st.caption(
+                f"History coverage: {start_dt.strftime('%Y-%m-%d')} → {end_dt.strftime('%Y-%m-%d')}"
+                f" | {len(fixed_history)} full days"
+            )
+
+            price_series = load_pzu_price_series(
+                provider.pzu_csv,
+                start_date=history_start,
+                end_date=history_end,
+            )
+            if not price_series.empty:
+                st.line_chart(
+                    price_series.set_index("date")["avg_price_eur_mwh"],
+                    height=260,
+                )
+                st.caption("Average PZU price per day over the selected window.")
+
+            st.subheader("Best Fixed 2h Cycle (historical across all days)")
+            st.caption(
+                "This summary finds the single 2-hour charge and discharge block that performs best over the selected window using the current capacity and power."
+            )
+
+            buy_hour = fixed_cycle.get("buy_start_hour")
+            sell_hour = fixed_cycle.get("sell_start_hour")
+            if buy_hour is None or sell_hour is None:
+                st.info("Not enough consistent history to determine a fixed 2h schedule.")
+            else:
+                stats = enrich_cycle_stats(fixed_cycle.get("stats", {}), fixed_history)
+                total_profit = stats.get("total_profit_eur", 0.0)
+                total_days = stats.get("total_days", 1)
+                positive_days = stats.get("positive_days", 0)
+                win_rate = (positive_days / total_days * 100) if total_days > 0 else 0.0
+                spread = stats.get("spread_eur_mwh", 0.0)
+
+                profit_indicator = get_status_indicator(total_profit, "profit")
+                win_rate_indicator = get_status_indicator(win_rate, "win_rate")
+                spread_indicator = get_status_indicator(spread, "spread")
+
+                st.markdown("### 📅 Optimal Schedule")
+                buy_end = min(int(buy_hour) + 2, 24)
+                sell_end = min(int(sell_hour) + 2, 24)
+
+                schedule_cols = st.columns(4)
+                schedule_cols[0].metric(
+                    "⚡ Charge Window",
+                    f"{int(buy_hour):02d}:00–{buy_end:02d}:00",
+                    help="Optimal 2-hour charging period (lowest prices)",
+                )
+                schedule_cols[1].metric(
+                    "🔋 Discharge Window",
+                    f"{int(sell_hour):02d}:00–{sell_end:02d}:00",
+                    help="Optimal 2-hour discharging period (highest prices)",
+                )
+                schedule_cols[2].metric(
+                    "📥 Charge Energy",
+                    f"{fixed_cycle['charge_energy_mwh']:.1f} MWh",
+                    help="Total energy absorbed during charging",
+                )
+                schedule_cols[3].metric(
+                    "📤 Discharge Energy",
+                    f"{fixed_cycle['discharge_energy_mwh']:.1f} MWh",
+                    help="Total energy delivered during discharging",
+                )
+
+                st.markdown("### 💰 Financial Performance")
+                price_decimals = max(currency_decimals, 2)
+
+                try:
+                    daily_history_subset = fixed_history[
+                        [
+                            "date",
+                            "daily_profit_eur",
+                            "daily_revenue_eur",
+                            "daily_cost_eur",
+                        ]
+                    ].copy()
+                    history_start_val = sanitize_session_value(history_start)
+                    history_end_val = sanitize_session_value(history_end)
+                    stats_clean = sanitize_session_value(stats)
+                    daily_history_records = sanitize_session_value(
+                        daily_history_subset.to_dict(orient="records")
+                    )
+                    new_pzu_metrics = {
+                        "history_start": history_start_val,
+                        "history_end": history_end_val,
+                        "stats": stats_clean,
+                        "daily_history": daily_history_records,
+                    }
+                    safe_session_state_update("pzu_market_metrics", new_pzu_metrics)
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
+                fin_cols = st.columns(4)
+                fin_cols[0].metric(
+                    f"{profit_indicator} Total Profit",
+                    format_currency(total_profit, decimals=currency_decimals, thousands=thousands_sep),
+                    help="Total profit over the analysis period",
+                )
+                fin_cols[1].metric(
+                    "📊 Average Daily",
+                    format_currency(
+                        stats.get("average_profit_eur", 0.0),
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                    help="Average daily profit",
+                )
+                fin_cols[2].metric(
+                    "📈 Total Revenue",
+                    format_currency(
+                        stats.get("total_revenue_eur", 0.0),
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                    help="Total revenue from energy sales",
+                )
+                fin_cols[3].metric(
+                    "📉 Total Cost",
+                    format_currency(
+                        stats.get("total_cost_eur", 0.0),
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                    help="Total cost of energy purchases",
+                )
+
+                price_cols = st.columns(4)
+                price_cols[0].metric(
+                    "💰 Avg Sell Price",
+                    format_price_per_mwh(
+                        stats.get("avg_sell_price_eur_mwh"), decimals=price_decimals
+                    ),
+                    help="Average price received when selling energy",
+                )
+                price_cols[1].metric(
+                    "💵 Avg Buy Price",
+                    format_price_per_mwh(
+                        stats.get("avg_buy_price_eur_mwh"), decimals=price_decimals
+                    ),
+                    help="Average price paid when buying energy",
+                )
+                price_cols[2].metric(
+                    f"{spread_indicator} Spread",
+                    format_price_per_mwh(stats.get("spread_eur_mwh"), decimals=price_decimals),
+                    help="Average price spread (sell - buy)",
+                )
+                price_cols[3].metric(
+                    f"{win_rate_indicator} Win Rate",
+                    f"{win_rate:.1f}%",
+                    help=f"{positive_days} profitable days out of {total_days}",
+                )
+
+                success_cols = st.columns(4)
+                success_cols[0].metric(
+                    "✅ Winning Days",
+                    str(stats.get("positive_days", 0)),
+                    help="Number of days with positive profit",
+                )
+                success_cols[1].metric(
+                    "❌ Losing Days",
+                    str(stats.get("negative_days", 0)),
+                    help="Number of days with negative profit",
+                )
+                success_cols[2].metric(
+                    "📉 Total Loss",
+                    format_currency(
+                        stats.get("total_loss_eur", 0.0),
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                    help="Sum of all losses on losing days",
+                )
+                avg_loss = (
+                    stats.get("total_loss_eur", 0.0) / stats.get("negative_days", 1)
+                    if stats.get("negative_days", 0) > 0
+                    else 0.0
+                )
+                success_cols[3].metric(
+                    "📉 Avg Loss/Day",
+                    format_currency(avg_loss, decimals=currency_decimals, thousands=thousands_sep),
+                    help="Average loss per losing day",
+                )
+
+                if fixed_summaries:
+                    st.markdown("#### Historical Profitability Windows")
+                    summary_rows: List[dict[str, object]] = []
+                    for window in fixed_summaries:
+                        period = window.get("period_label", "Unknown")
+                        profit_val = window.get("total_profit_eur", 0.0)
+                        indicator = get_status_indicator(profit_val, "profit")
+                        win_pct = window.get("win_rate_percent", 0.0)
+                        win_indicator = get_status_indicator(win_pct, "win_rate")
+                        summary_rows.append(
+                            {
+                                "Period": f"{indicator} {period}",
+                                "Days": window.get("days", 0),
+                                "Total Profit": format_currency(
+                                    profit_val, decimals=currency_decimals, thousands=thousands_sep
+                                ),
+                                "Avg Daily": format_currency(
+                                    window.get("avg_profit_eur", 0.0),
+                                    decimals=currency_decimals,
+                                    thousands=thousands_sep,
+                                ),
+                                "Win Rate": f"{win_indicator} {win_pct:.1f}%",
+                            }
+                        )
+                    if summary_rows:
+                        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+                cash_flow_3y = build_cash_flow_summary(fixed_history, years=3, freq="Y")
+                if not cash_flow_3y.empty:
+                    st.markdown("#### Annual Cash Flow (Last 3 Years)")
+                    display_cf = cash_flow_3y.copy()
+                    for idx, row in display_cf.iterrows():
+                        if row.get("Year") != "Total":
+                            profit_val = cash_flow_3y.loc[idx, "Profit €"]
+                            if pd.notna(profit_val):
+                                indicator = get_status_indicator(profit_val, "profit")
+                                display_cf.loc[idx, "Year"] = f"{indicator} {row['Year']}"
+                    for col in ["Turnover €", "Cost €", "Profit €", "Loss €"]:
+                        if col in display_cf.columns:
+                            display_cf[col] = display_cf[col].apply(
+                                lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep)
+                                if pd.notna(v)
+                                else "—"
+                            )
+                    for col in ["Avg buy €/MWh", "Avg sell €/MWh", "Spread €/MWh"]:
+                        if col in display_cf.columns:
+                            display_cf[col] = display_cf[col].apply(
+                                lambda v: format_price_per_mwh(v, decimals=price_decimals)
+                                if pd.notna(v)
+                                else "—"
+                            )
+                    st.dataframe(display_cf, use_container_width=True, hide_index=True)
+
+            st.subheader("Custom Fixed 2h Scenario")
+            st.caption(
+                "Adjust capacity, power and date range to evaluate a separate fixed 2‑hour schedule without altering the main view above."
+            )
+
+            scenario_cols = st.columns(2)
+            scenario_capacity = scenario_cols[0].number_input(
+                "Scenario capacity (MWh)",
+                min_value=1.0,
+                value=float(capacity_mwh),
+                step=1.0,
+                key="scenario_capacity",
+            )
+            scenario_power = scenario_cols[1].number_input(
+                "Scenario power (MW)",
+                min_value=0.1,
+                value=float(power_mw),
+                step=0.5,
+                key="scenario_power",
+            )
+
+            scenario_date_cols = st.columns(2)
+            scenario_min = (
+                earliest_available_ts or history_start or pd.Timestamp(date.today())
+            ).to_pydatetime().date()
+            scenario_max = (
+                latest_available_ts or history_end or pd.Timestamp(date.today())
+            ).to_pydatetime().date()
+            scenario_start_input = scenario_date_cols[0].date_input(
+                "Scenario start",
+                value=(history_start or earliest_available_ts or pd.Timestamp(date.today())).to_pydatetime().date(),
+                min_value=scenario_min,
+                max_value=scenario_max,
+                key="scenario_start",
+            )
+            scenario_end_input = scenario_date_cols[1].date_input(
+                "Scenario end",
+                value=(history_end or latest_available_ts or pd.Timestamp(date.today())).to_pydatetime().date(),
+                min_value=scenario_start_input,
+                max_value=scenario_max,
+                key="scenario_end",
+            )
+            scenario_start_ts = pd.Timestamp(scenario_start_input)
+            scenario_end_ts = pd.Timestamp(scenario_end_input)
+
+            scenario_cycle = compute_best_fixed_cycle(
+                pzu_csv=provider.pzu_csv,
+                capacity_mwh=float(scenario_capacity),
+                power_mw=float(scenario_power),
+                round_trip_efficiency=eta_rt,
+                start_date=scenario_start_ts,
+                end_date=scenario_end_ts,
+            )
+            scenario_history = scenario_cycle.get("daily_history", pd.DataFrame())
+            if scenario_history.empty:
+                st.info("Scenario window produced no valid days.")
+            else:
+                scenario_stats = enrich_cycle_stats(scenario_cycle.get("stats", {}), scenario_history)
+                sc_price_decimals = max(currency_decimals, 2)
+
+                scenario_price_cols = st.columns(4)
+                scenario_price_cols[0].metric(
+                    "Total profit",
+                    format_currency(
+                        scenario_stats.get("total_profit_eur", 0.0),
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                )
+                scenario_price_cols[1].metric(
+                    "Average day",
+                    format_currency(
+                        scenario_stats.get("average_profit_eur", 0.0),
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                )
+                scenario_price_cols[2].metric(
+                    "Total revenue",
+                    format_currency(
+                        scenario_stats.get("total_revenue_eur", 0.0),
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                )
+                scenario_price_cols[3].metric(
+                    "Total cost",
+                    format_currency(
+                        scenario_stats.get("total_cost_eur", 0.0),
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                )
+
+                sc_extra_cols = st.columns(3)
+                sc_extra_cols[0].metric(
+                    "Avg sell price",
+                    format_price_per_mwh(
+                        scenario_stats.get("avg_sell_price_eur_mwh"), decimals=sc_price_decimals
+                    ),
+                )
+                sc_extra_cols[1].metric(
+                    "Avg buy price",
+                    format_price_per_mwh(
+                        scenario_stats.get("avg_buy_price_eur_mwh"), decimals=sc_price_decimals
+                    ),
+                )
+                sc_extra_cols[2].metric(
+                    "Spread €/MWh",
+                    format_price_per_mwh(
+                        scenario_stats.get("spread_eur_mwh"), decimals=sc_price_decimals
+                    ),
+                )
+
+                scenario_summary = summarize_profit_windows(scenario_history)
+                if scenario_summary:
+                    sc_df = pd.DataFrame(
+                        {
+                            key: [row.get(key) for row in scenario_summary]
+                            for key in scenario_summary[0].keys()
+                        }
+                    )
+                    preferred_order = [
+                        "Period",
+                        "Days",
+                        "Coverage %",
+                        "Recent total €",
+                        "Avg daily €",
+                        "Recent revenue €",
+                        "Recent cost €",
+                        "Loss €",
+                        "Projected total €",
+                        "Projected revenue €",
+                        "Projected cost €",
+                        "Projected loss €",
+                        "Spread €/MWh",
+                        "Win rate %",
+                    ]
+                    existing_order = [c for c in preferred_order if c in sc_df.columns]
+                    remaining_cols = [c for c in sc_df.columns if c not in existing_order]
+                    sc_df = sc_df[existing_order + remaining_cols]
+                    if show_raw_tables:
+                        st.dataframe(sc_df, width="stretch")
+                    else:
+                        sc_display = sc_df.copy()
+
+                        if "Coverage %" in sc_display.columns:
+                            sc_display["Coverage %"] = sc_display["Coverage %"].apply(
+                                lambda v: format_percent(v, decimals=percent_decimals) if v is not None else "—"
+                            )
+
+                        currency_cols = [
+                            "Recent total €",
+                            "Avg daily €",
+                            "Recent revenue €",
+                            "Recent cost €",
+                            "Loss €",
+                            "Projected total €",
+                            "Projected revenue €",
+                            "Projected cost €",
+                            "Projected loss €",
+                        ]
+                        for col in currency_cols:
+                            if col in sc_display.columns:
+                                sc_display[col] = sc_display[col].apply(
+                                    lambda v: format_currency(
+                                        v, decimals=currency_decimals, thousands=thousands_sep
+                                    )
+                                    if v is not None
+                                    else "—"
+                                )
+
+                        if "Spread €/MWh" in sc_display.columns:
+                            spread_decimals = max(currency_decimals, 2)
+                            sc_display["Spread €/MWh"] = sc_display["Spread €/MWh"].apply(
+                                lambda v: format_price_per_mwh(v, decimals=spread_decimals)
+                                if v is not None
+                                else "—"
+                            )
+
+                        if "Win rate %" in sc_display.columns:
+                            sc_display["Win rate %"] = sc_display["Win rate %"].apply(
+                                lambda v: format_percent(v, decimals=percent_decimals)
+                                if v is not None
+                                else "—"
+                            )
+
+                        st.dataframe(sc_display, width="stretch")
+
+                    three_year_summary = next(
+                        (
+                            row
+                            for row in scenario_summary
+                            if row.get("period_label") == "3 years"
+                        ),
+                        None,
+                    )
+                    if three_year_summary:
+                        projected_profit = three_year_summary.get("projected_total_eur")
+                        projected_revenue = three_year_summary.get("projected_revenue_eur")
+                        projected_cost = three_year_summary.get("projected_cost_eur")
+                        projected_loss = three_year_summary.get("projected_loss_eur")
+                        projected_spread = three_year_summary.get("projected_spread_eur_mwh")
+
+                        if any(
+                            value is not None
+                            for value in (
+                                projected_profit,
+                                projected_revenue,
+                                projected_cost,
+                                projected_loss,
+                                projected_spread,
+                            )
+                        ):
+                            st.subheader("Simulated 3-Year Totals (scenario)")
+                            sim_cols = st.columns(5)
+                            sim_cols[0].metric(
+                                "Profit (3y sim)",
+                                format_currency(
+                                    projected_profit or three_year_summary.get("recent_total_eur", 0.0),
+                                    decimals=currency_decimals,
+                                    thousands=thousands_sep,
+                                ),
+                            )
+                            sim_cols[1].metric(
+                                "Revenue (3y sim)",
+                                format_currency(
+                                    projected_revenue or three_year_summary.get("recent_revenue_eur", 0.0),
+                                    decimals=currency_decimals,
+                                    thousands=thousands_sep,
+                                ),
+                            )
+                            sim_cols[2].metric(
+                                "Cost (3y sim)",
+                                format_currency(
+                                    projected_cost or three_year_summary.get("recent_cost_eur", 0.0),
+                                    decimals=currency_decimals,
+                                    thousands=thousands_sep,
+                                ),
+                            )
+                            sim_cols[3].metric(
+                                "Loss (3y sim)",
+                                format_currency(
+                                    projected_loss or three_year_summary.get("recent_loss_eur", 0.0),
+                                    decimals=currency_decimals,
+                                    thousands=thousands_sep,
+                                ),
+                            )
+                            sim_cols[4].metric(
+                                "Spread €/MWh (3y sim)",
+                                format_price_per_mwh(
+                                    projected_spread
+                                    or three_year_summary.get("recent_spread_eur_mwh"),
+                                    decimals=max(currency_decimals, 2),
+                                ),
+                            )
+
+                            scenario_days = max(int(three_year_summary.get("recent_days", 0)), 1)
+                            expected_days = max(
+                                int(three_year_summary.get("expected_days", scenario_days)),
+                                scenario_days,
+                            )
+                            scaling_factor = expected_days / scenario_days if scenario_days else 1.0
+
+                            recent_history = three_year_summary.get("recent_total_eur", 0.0)
+                            projected_history = projected_profit or recent_history * scaling_factor
+
+                            comparison_table = pd.DataFrame(
+                                {
+                                    "Phase": ["Actual window", "Projected 3y"],
+                                    "Profit €": [
+                                        format_currency(
+                                            recent_history,
+                                            decimals=currency_decimals,
+                                            thousands=thousands_sep,
+                                        ),
+                                        format_currency(
+                                            projected_history,
+                                            decimals=currency_decimals,
+                                            thousands=thousands_sep,
+                                        ),
+                                    ],
+                                }
+                            )
+                            st.table(comparison_table)
+
+                cash_flow_scenario = build_cash_flow_summary(scenario_history, freq="M")
+                if not cash_flow_scenario.empty:
+                    st.subheader("36-Month Cash Flow (scenario)")
+                    scen_display = cash_flow_scenario.copy()
+                    period_col = "Month" if "Month" in scen_display.columns else "Year"
+                    preferred_cols = [
+                        period_col,
+                        "Days",
+                        "Turnover €",
+                        "Cost €",
+                        "Profit €",
+                        "Loss €",
+                        "Avg buy €/MWh",
+                        "Avg sell €/MWh",
+                        "Spread €/MWh",
+                    ]
+                    remaining_cols = [c for c in scen_display.columns if c not in preferred_cols]
+                    scen_display = scen_display[[c for c in preferred_cols if c in scen_display.columns] + remaining_cols]
+                    scen_currency_cols = ["Turnover €", "Cost €", "Profit €", "Loss €"]
+                    for col in scen_currency_cols:
+                        if col in scen_display.columns:
+                            scen_display[col] = scen_display[col].apply(
+                                lambda v, d=currency_decimals: format_currency(
+                                    v, decimals=d, thousands=thousands_sep
+                                )
+                                if v is not None
+                                else "—"
+                            )
+                    scen_price_cols = ["Avg buy €/MWh", "Avg sell €/MWh", "Spread €/MWh"]
+                    scen_price_decimals = max(currency_decimals, 2)
+                    for col in scen_price_cols:
+                        if col in scen_display.columns:
+                            scen_display[col] = scen_display[col].apply(
+                                lambda v, d=scen_price_decimals: format_price_per_mwh(v, decimals=d)
+                                if v is not None
+                                else "—"
+                            )
+                    st.dataframe(scen_display, width="stretch")
+
+        if enable_roi_trends and not daily_history.empty:
+            st.subheader("📅 Monthly Profitability Trends")
+            monthly_trends = analyze_historical_monthly_trends_only(
+                provider.pzu_csv,
+                capacity_mwh,
+                eta_rt,
+                start_year=2023,
+            )
+            if "error" in monthly_trends:
+                st.error(monthly_trends["error"])
+                if "suggestion" in monthly_trends:
+                    st.info(monthly_trends["suggestion"])
+            elif "info" in monthly_trends:
+                st.info(monthly_trends["info"])
+                if "reason" in monthly_trends:
+                    st.caption(monthly_trends["reason"])
+                if "suggestion" in monthly_trends:
+                    st.caption(f"💡 {monthly_trends['suggestion']}")
+            else:
+                st.success(
+                    f"✅ {monthly_trends['analysis_type']} - {monthly_trends['total_months']} months analyzed"
+                )
+                if monthly_trends.get("monthly_data"):
+                    monthly_data = monthly_trends["monthly_data"]
+                    months = [m["month"] for m in monthly_data]
+                    profits = [m["total_monthly_profit"] for m in monthly_data]
+                    with safe_pyplot_figure(figsize=(12, 6)) as (fig_monthly, ax_monthly):
+                        chart_colors = get_chart_colors()
+                        ax_monthly.bar(range(len(months)), profits, alpha=0.7, color=chart_colors["darkgreen"])
+                        ax_monthly.set_xlabel("Month")
+                        ax_monthly.set_ylabel("Monthly Profit (EUR)")
+                        ax_monthly.set_title(
+                            f"Historical Monthly Profitability ({monthly_trends.get('data_period', 'historical range')})"
+                        )
+                        ax_monthly.set_xticks(range(len(months)))
+                        ax_monthly.set_xticklabels(months, rotation=45)
+                        ax_monthly.grid(True, alpha=0.3)
+                        ax_monthly.axhline(y=0, color=chart_colors["red"], linestyle="-", alpha=0.5)
+                        plt.tight_layout()
+                        st.pyplot(fig_monthly, clear_figure=True)
+
+            st.subheader("💡 Historical ROI (from 2023)")
+            roi_window = st.radio("ROI window (months)", options=[12, 24], index=0, horizontal=True)
+            roi12 = calculate_historical_roi_metrics(
+                provider.pzu_csv,
+                capacity_mwh,
+                investment_eur=6_500_000,
+                start_year=2023,
+                window_months=12,
+                round_trip_efficiency=eta_rt,
+            )
+            roi24 = calculate_historical_roi_metrics(
+                provider.pzu_csv,
+                capacity_mwh,
+                investment_eur=6_500_000,
+                start_year=2023,
+                window_months=24,
+                round_trip_efficiency=eta_rt,
+            )
+            chosen_roi = roi12 if roi_window == 12 else roi24
+            if "error" in chosen_roi:
+                st.error(chosen_roi["error"])
+            elif "info" in chosen_roi:
+                st.info(chosen_roi["info"])
+                if "reason" in chosen_roi:
+                    st.caption(chosen_roi["reason"])
+                if "suggestion" in chosen_roi:
+                    st.caption(f"💡 {chosen_roi['suggestion']}")
+            else:
+                r1, r2, r3, r4 = st.columns(4)
+                r1.metric(
+                    "🎯 Annual ROI",
+                    format_percent(chosen_roi["roi_annual_percent"], decimals=percent_decimals),
+                )
+                r2.metric(
+                    "💰 Annualized Profit",
+                    format_currency(
+                        chosen_roi["annualized_profit_eur"],
+                        decimals=currency_decimals,
+                        thousands=thousands_sep,
+                    ),
+                )
+                r3.metric(
+                    "⏳ Payback Period",
+                    f"{chosen_roi['payback_years']:.1f} years"
+                    if chosen_roi["payback_years"] != float("inf")
+                    else "∞",
+                )
+                r4.metric("🏁 Window", f"{chosen_roi['window_months']} mo")
+                st.caption(
+                    f"Investment assumed: €{chosen_roi['investment_eur']:,.0f} | Data period: {chosen_roi.get('data_period','N/A')}"
+                )
+
+            st.subheader("⏱️ 3‑Year Best‑Hour Arbitrage Estimate (OPCOM PZU)")
+            best3 = analyze_pzu_best_hours_min_years(
+                provider.pzu_csv,
+                min_years=3,
+                round_trip_efficiency=eta_rt,
+                capacity_mwh=capacity_mwh,
+                investment_eur=6_500_000,
+            )
+            if "error" in best3:
+                st.warning(best3["error"])
+                if "suggestion" in best3:
+                    st.caption(best3["suggestion"])
+            else:
+                b1, b2, b3, b4, b5 = st.columns(5)
+                b1.metric(
+                    "Best BUY hour",
+                    f"{best3['buy_hour']:02d}:00",
+                    help="Hour-of-day with lowest 3-year average price",
+                )
+                b2.metric(
+                    "Best SELL hour",
+                    f"{best3['sell_hour']:02d}:00",
+                    help="Hour-of-day with highest 3-year average price",
+                )
+                b3.metric("Net spread", format_currency(best3["net_spread_eur_mwh"], decimals=2) + "/MWh")
+                b4.metric("Daily profit", format_currency(best3["daily_profit_eur"], decimals=0))
+                b5.metric("Annual profit", format_currency(best3["annual_profit_eur"], decimals=0))
+                rb1, rb2 = st.columns(2)
+                rb1.metric("Annual ROI", format_percent(best3["roi_annual_percent"], decimals=1))
+                rb2.metric(
+                    "Payback",
+                    f"{best3['payback_years']:.1f} years"
+                    if best3["payback_years"] != float("inf")
+                    else "∞",
+                )
+                st.caption(f"Period: {best3['data_period']} ({best3['period_months']} months)")
+
+            st.subheader("🕒 Multi‑hour Buffer Strategy (3y averages)")
+            colb1, colb2, colb3 = st.columns(3)
+            with colb1:
+                buf_buy = st.slider("Buy hours (per cycle)", 1, 6, 2)
+            with colb2:
+                buf_sell = st.slider("Sell hours (per cycle)", 1, 6, 2)
+            with colb3:
+                cycles_day = st.slider(
+                    "Cycles per day",
+                    1,
+                    3,
+                    int(cfg.get("strategy", {}).get("pzu", {}).get("daily_cycles_target", 1)),
+                )
+
+            mh = plan_multi_hour_strategy_from_history(
+                provider.pzu_csv,
+                min_years=3,
+                round_trip_efficiency=eta_rt,
+                capacity_mwh=capacity_mwh,
+                power_mw=power_mw,
+                buy_hours_buffer=int(buf_buy),
+                sell_hours_buffer=int(buf_sell),
+                cycles_per_day=int(cycles_day),
+                investment_eur=6_500_000,
+            )
+            if isinstance(mh, tuple) and "error" in mh[0]:
+                st.warning(mh[0]["error"])
+            elif "error" in mh:
+                st.warning(mh["error"])
+            else:
+                mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+                mcol1.metric("Profit/cycle", format_currency(mh["profit_per_cycle_eur"], decimals=0))
+                mcol2.metric("Cycles/day used", f"{mh['cycles_used_per_day']}")
+                mcol3.metric("Daily profit", format_currency(mh["daily_profit_eur"], decimals=0))
+                mcol4.metric("Annual profit", format_currency(mh["annual_profit_eur"], decimals=0))
+                mcol5, mcol6 = st.columns(2)
+                mcol5.metric("Annual ROI", format_percent(mh["roi_annual_percent"], decimals=1))
+                mcol6.metric(
+                    "Payback",
+                    f"{mh['payback_years']:.1f} years"
+                    if mh["payback_years"] != float("inf")
+                    else "∞",
+                )
+                st.caption(
+                    f"Buy hours: {sorted(mh['buy_hours'])} | Sell hours: {sorted(mh['sell_hours'])}"
+                )
+
+    return capacity_mwh, power_mw, history_start, history_end

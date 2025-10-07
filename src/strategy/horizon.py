@@ -293,6 +293,8 @@ def compute_best_fixed_cycle(
         "total_revenue_eur": total_revenue,
         "total_cost_eur": total_cost,
         "total_loss_eur": total_loss,
+        "total_charge_energy": total_charge_energy,
+        "total_discharge_energy": total_discharge_energy,
         "avg_buy_price_eur_mwh": avg_buy_price,
         "avg_sell_price_eur_mwh": avg_sell_price,
         "spread_eur_mwh": spread_price,
