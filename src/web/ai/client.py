@@ -7,6 +7,7 @@ from typing import Optional
 
 import requests
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 
 # Default model/version – adjust if you want to target a different endpoint.
 GENAI_MODEL = "models/text-bison-001"
@@ -28,9 +29,19 @@ def get_google_api_key() -> str:
         If the key is missing.
     """
     # Streamlit Cloud / secrets.toml
-    secrets = getattr(st, "secrets", {})
-    if secrets and "GOOGLE_API_KEY" in secrets:
-        return secrets["GOOGLE_API_KEY"]
+    secrets_obj: Optional[object] = None
+    try:
+        secrets_obj = getattr(st, "secrets", None)
+    except Exception:
+        secrets_obj = None
+
+    if secrets_obj is not None:
+        try:
+            return secrets_obj["GOOGLE_API_KEY"]  # type: ignore[index]
+        except (KeyError, TypeError, AttributeError, StreamlitSecretNotFoundError):
+            pass
+        except Exception:
+            pass
 
     # Local environment
     env_key = os.environ.get("GOOGLE_API_KEY")

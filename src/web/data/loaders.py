@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 import yaml
 
-from src.tools.aggregate_imbalance_manual import (
+from ...tools.aggregate_imbalance_manual import (
     _detect_columns as _imb_detect_columns,
     _normalize as _imb_normalize,
     _read_any as _imb_read_any,

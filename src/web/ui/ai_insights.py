@@ -123,14 +123,18 @@ def render_ai_insights() -> None:
     )
     question = st.text_area("AI question", value=default_question, height=120)
 
+    api_key_available = True
     try:
         # Test for key presence before the user hits the button so we can surface a clear warning.
         get_google_api_key()
     except RuntimeError as exc:
-        st.warning(str(exc))
-        st.stop()
+        api_key_available = False
+        st.warning(
+            f"{exc}\n\nAdd a `.streamlit/secrets.toml` with `GOOGLE_API_KEY = \"...\"` "
+            "or export the `GOOGLE_API_KEY` environment variable to enable the assistant."
+        )
 
-    if st.button("Generate AI Insight", width="stretch"):
+    if st.button("Generate AI Insight", disabled=not api_key_available, width="stretch"):
         prompt = _compose_prompt(question)
         with st.spinner("Contacting AI service..."):
             try:
@@ -141,6 +145,8 @@ def render_ai_insights() -> None:
                 st.markdown("---")
                 st.markdown("#### AI Response")
                 st.markdown(answer)
+    elif not api_key_available:
+        st.info("AI insights will remain disabled until a Google API key is configured.")
 
     with st.expander("Prompt context preview", expanded=False):
         st.code(_compose_prompt(question), language="markdown")
