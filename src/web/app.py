@@ -23,7 +23,7 @@ matplotlib.use('Agg')
 from src.data.data_provider import DataProvider
 from src.web.data import load_config
 from src.web.ui import (
-    render_battery_assistant,
+    render_ai_insights,
     render_frequency_regulation_simulator,
     render_historical_market_comparison,
     render_investment_financing_analysis,
@@ -61,7 +61,7 @@ page_header(
 view = st.radio(
     "",
     options=[
-        "🤖 AI Assistant",
+        "AI Insights",
         "PZU Horizons",
         "FR Simulator",
         "Market Comparison",
@@ -180,7 +180,10 @@ with st.sidebar:
 # RENDER SELECTED VIEW
 # ============================================================================
 
-if view == "PZU Horizons":
+if view == "AI Insights":
+    render_ai_insights()
+
+elif view == "PZU Horizons":
     capacity_mwh, power_mw, history_start, history_end = render_pzu_horizons(
         cfg=cfg,
         provider=provider,
@@ -219,6 +222,3 @@ elif view == "Market Comparison":
 
 elif view == "Investment & Financing":
     render_investment_financing_analysis(cfg)
-
-elif view == "🤖 AI Assistant":
-    render_battery_assistant(cfg)

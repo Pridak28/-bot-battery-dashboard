@@ -418,6 +418,27 @@ def list_in_data_dir(patterns: List[str]) -> List[str]:
     return uniq
 
 
+def require_data_file(filename: str, *, description: Optional[str] = None) -> Path:
+    """
+    Return a Path to data/<filename>. If the file is missing, show a user-friendly
+    error and halt the Streamlit script. This prevents blank pages on hosted deployments
+    when required datasets aren't bundled with the app.
+    """
+    path = project_root / "data" / filename
+    if path.exists():
+        return path
+
+    message = f"Required data file not found: {path}"
+    if description:
+        message += f" — {description}"
+    message += (
+        ". Add the file to the repository (data/ folder) or update the configuration "
+        "before rerunning the app."
+    )
+    st.error(message)
+    st.stop()
+
+
 @st.cache_data(show_spinner=False)
 def parse_battery_specs_from_document(path: str) -> Dict[str, Optional[float]]:
     """Parse a document for headline battery specifications."""

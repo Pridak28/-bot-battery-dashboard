@@ -13,6 +13,7 @@ from src.web.data import (
     build_hedge_price_curve,
     find_in_data_dir,
     list_in_data_dir,
+    require_data_file,
     load_system_imbalance_from_excel,
     load_transelectrica_imbalance_from_excel,
     normalize_calendar_df,
@@ -79,7 +80,10 @@ def render_frequency_regulation_simulator(
     sample_sysimb = project_root / "data" / "Estimated power system imbalance.xlsx"
 
     # PRIORITY 1: DAMAS-enriched CSV (has aFRR/mFRR actual activation data)
-    imbalance_history_csv = project_root / "data" / "imbalance_history.csv"
+    imbalance_history_csv = require_data_file(
+        "imbalance_history.csv",
+        description="needed for FR Simulator defaults",
+    )
     corrected_imbalance = project_root / "data" / "imbalance_history_corrected.csv"
 
     default_export8 = (
