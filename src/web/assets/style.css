@@ -86,10 +86,10 @@ body {
     background: var(--bg-main) !important;
 }
 
-/* Main content area - More spacing */
+/* Main content area - Better spacing */
 .main .block-container {
     max-width: 1600px !important;
-    padding: 3rem 2.5rem 4rem !important;
+    padding: 2rem 2rem 3rem !important;
 }
 
 /* ============================================================================
@@ -774,6 +774,33 @@ div[data-baseweb="notification"][kind="info"],
     .main-header {
         padding: 1.5rem !important;
     }
+}
+
+/* ============================================================================
+   IMPROVED SPACING FOR CONTAINERS
+   ============================================================================ */
+
+/* Better spacing for text areas (AI responses) */
+.stTextArea textarea:disabled {
+    background: var(--bg-card-alt) !important;
+    opacity: 1 !important;
+}
+
+/* Scrollable containers */
+[data-testid="stVerticalBlock"] > div[style*="height"] {
+    padding: 0.5rem !important;
+    overflow-y: auto !important;
+}
+
+/* Better column spacing */
+[data-testid="column"] {
+    padding: 0 0.5rem !important;
+}
+
+/* Improved divider spacing */
+[data-testid="stHorizontalBlock"] > hr,
+hr {
+    margin: 1.5rem 0 !important;
 }
 
 /* ============================================================================
