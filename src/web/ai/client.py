@@ -105,6 +105,12 @@ def call_google_text(
     response.raise_for_status()
 
     data = response.json()
+
+    # Check for API errors first
+    if "error" in data:
+        error_msg = data["error"].get("message", "Unknown API error")
+        raise RuntimeError(f"Gemini API error: {error_msg}")
+
     candidates = data.get("candidates") or []
     if not candidates:
         raise RuntimeError("No response candidates returned by the model.")
@@ -112,10 +118,23 @@ def call_google_text(
     first = candidates[0]
     content = first.get("content") or {}
     parts = content.get("parts") or []
-    if not parts:
-        raise RuntimeError("Model response did not include text content.")
 
-    text = parts[0].get("text", "")
-    if not text:
-        raise RuntimeError("Model response text was empty.")
-    return text.strip()
+    # Collect all text parts (sometimes response is split into multiple parts)
+    text_parts = []
+    for part in parts:
+        if "text" in part and part["text"]:
+            text_parts.append(part["text"])
+
+    if not text_parts:
+        # Debug: show what we got instead
+        import json
+        debug_info = json.dumps(data, indent=2)[:500]
+        raise RuntimeError(f"Model response did not include text content. Response structure: {debug_info}")
+
+    # Join all text parts
+    full_text = " ".join(text_parts).strip()
+
+    if not full_text:
+        raise RuntimeError("Model response text was empty after processing.")
+
+    return full_text
