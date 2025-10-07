@@ -11,13 +11,14 @@ from streamlit.errors import StreamlitSecretNotFoundError
 
 # Default model/version – adjust via GOOGLE_GENAI_MODEL env if needed.
 _model_name = os.environ.get("GOOGLE_GENAI_MODEL", "gemini-1.5-flash")
-if not _model_name.startswith("models/"):
-    _model_name = f"models/{_model_name}"
+
+# The endpoint should be structured as /v1beta/models/{model}:{method}
+# The "models/" prefix is part of the path, not the model name itself.
+if _model_name.startswith("models/"):
+    _model_name = _model_name.split("/")[-1]
 
 GENAI_MODEL = _model_name
-GENAI_ENDPOINT = (
-    f"https://generativelanguage.googleapis.com/v1beta/{GENAI_MODEL}:generateContent"
-)
+GENAI_ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/{GENAI_MODEL}:generateContent"
 
 
 def get_google_api_key() -> str:

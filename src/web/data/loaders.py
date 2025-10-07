@@ -462,6 +462,8 @@ def require_any_data_file(
         message += "\nAdd one of these files to the repository or update configuration."
     st.error(message)
     st.stop()
+
+
 @st.cache_data(show_spinner=False)
 def parse_battery_specs_from_document(path: str) -> Dict[str, Optional[float]]:
     """Parse a document for headline battery specifications."""
@@ -531,5 +533,7 @@ __all__ = [
     "load_system_imbalance_from_excel",
     "find_in_data_dir",
     "list_in_data_dir",
+    "require_data_file",
+    "require_any_data_file",
     "parse_battery_specs_from_document",
 ]
