@@ -118,7 +118,7 @@ def _compose_prompt(user_question: str) -> str:
 
 def render_ai_insights(cfg: dict = None) -> None:
     """Render AI insights tab with full data access."""
-    section_title = "🤖 AI Insights Assistant"
+    section_title = "AI Insights Assistant"
     st.header(section_title)
     st.caption(
         "This assistant has full access to FR/DAMAS activation data, PZU prices, revenue calculations, "
@@ -153,13 +153,13 @@ def render_ai_insights(cfg: dict = None) -> None:
             st.metric("FR Data Points", f"{data_context['fr_data']['total_rows']:,}",
                      data_context["fr_data"]["data_accuracy"])
         else:
-            st.metric("FR Data", "Not Available", "❌")
+            st.metric("FR Data", "Not Available", "X")
 
     with col2:
         if data_context["pzu_data"]["available"]:
             st.metric("PZU Data Points", f"{data_context['pzu_data']['total_rows']:,}", "Historical")
         else:
-            st.metric("PZU Data", "Not Available", "❌")
+            st.metric("PZU Data", "Not Available", "X")
 
     with col3:
         if data_context["fr_data"].get("activation_stats"):
@@ -170,18 +170,33 @@ def render_ai_insights(cfg: dict = None) -> None:
 
     with col4:
         quality = data_context["data_quality"]["overall_quality"]
-        st.metric("Data Quality", quality, "✅" if quality == "Excellent" else "⚠️")
+        st.metric("Data Quality", quality, "Good" if quality == "Excellent" else "Check")
 
     # Display data context
-    with st.expander("📊 Available Data Context", expanded=False):
+    with st.expander("Available Data Context", expanded=False):
         st.code(json.dumps(data_context, indent=2, default=str)[:3000] + "...", language="json")
 
-    # Chat history display
-    for message in st.session_state.ai_chat_history:
-        if message["role"] == "user":
-            st.info(f"👤 **You:** {message['content']}")
-        else:
-            st.success(f"🤖 **AI:** {message['content']}")
+    # Chat history display in scrollable container
+    if st.session_state.ai_chat_history:
+        st.subheader("Conversation History")
+        # Create a scrollable container for chat history
+        chat_container = st.container(height=400)  # Fixed height for scrolling
+        with chat_container:
+            for message in st.session_state.ai_chat_history:
+                if message["role"] == "user":
+                    st.markdown(f"**You:** {message['content']}")
+                    st.divider()
+                else:
+                    # Display AI response in a text area for better readability
+                    st.markdown("**AI Response:**")
+                    st.text_area(
+                        label="AI Response",
+                        value=message['content'],
+                        height=200,
+                        disabled=True,
+                        label_visibility="collapsed"
+                    )
+                    st.divider()
 
     # Question input
     question = st.text_area(
@@ -193,13 +208,13 @@ def render_ai_insights(cfg: dict = None) -> None:
     # Example questions
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("📊 FR Revenue Analysis"):
+        if st.button("FR Revenue Analysis"):
             question = "Analyze FR revenue breakdown for 2024 with capacity vs activation split"
     with col2:
-        if st.button("💰 PZU vs FR Comparison"):
+        if st.button("PZU vs FR Comparison"):
             question = "Compare annual revenue potential between FR and PZU strategies"
 
-    if st.button("🚀 Generate AI Insight", disabled=not api_key_available, type="primary", use_container_width=True):
+    if st.button("Generate AI Insight", disabled=not api_key_available, type="primary", use_container_width=True):
         if question:
             # Add to chat history
             st.session_state.ai_chat_history.append({"role": "user", "content": question})
@@ -216,19 +231,19 @@ Instructions:
 4. Be precise and data-driven
 5. Format with clear sections"""
 
-            with st.spinner("🤔 Analyzing data with Gemini 2.5 Flash..."):
+            with st.spinner("Analyzing data with Gemini 2.5 Flash..."):
                 try:
-                    answer = call_google_text(prompt=full_prompt, temperature=0.3, max_tokens=1024)
+                    answer = call_google_text(prompt=full_prompt, temperature=0.3, max_tokens=2000)
                     st.session_state.ai_chat_history.append({"role": "assistant", "content": answer})
                     st.rerun()
                 except Exception as exc:
                     st.error(f"AI request failed: {exc}")
 
     # Clear chat
-    if st.button("🗑️ Clear Chat"):
+    if st.button("Clear Chat History"):
         st.session_state.ai_chat_history = []
         st.rerun()
 
     # Show prompt preview
-    with st.expander("🔍 Full Data Context & Prompt", expanded=False):
+    with st.expander("Full Data Context & Prompt", expanded=False):
         st.code(context_prompt, language="markdown")
