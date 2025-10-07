@@ -117,15 +117,36 @@ def call_google_text(
 
     first = candidates[0]
     content = first.get("content") or {}
+
+    # Handle different response structures
+    # Sometimes the text is in parts, sometimes directly in content
     parts = content.get("parts") or []
 
-    # Collect all text parts (sometimes response is split into multiple parts)
+    # Collect all text parts
     text_parts = []
+
+    # First check if there are parts with text
     for part in parts:
-        if "text" in part and part["text"]:
+        if isinstance(part, dict) and "text" in part and part["text"]:
             text_parts.append(part["text"])
 
+    # If no text found in parts, check if text is directly in content
+    if not text_parts and "text" in content:
+        text_parts.append(content["text"])
+
+    # Also check if the candidate has text directly
+    if not text_parts and "text" in first:
+        text_parts.append(first["text"])
+
     if not text_parts:
+        # Check if response hit token limit with empty content
+        finish_reason = first.get("finishReason", "")
+        if finish_reason == "MAX_TOKENS":
+            raise RuntimeError(
+                f"Model response was truncated (MAX_TOKENS reached). "
+                f"Try reducing max_tokens or simplifying the prompt."
+            )
+
         # Debug: show what we got instead
         import json
         debug_info = json.dumps(data, indent=2)[:500]
