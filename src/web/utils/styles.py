@@ -8,14 +8,18 @@ import streamlit as st
 
 def load_css():
     """Load the unified UI stylesheet - forces reload on every render to prevent white screen."""
-    css_path = Path(__file__).parent.parent / "assets" / "style.css"
+    # Try enhanced CSS first, fallback to original
+    css_enhanced = Path(__file__).parent.parent / "assets" / "style_enhanced.css"
+    css_original = Path(__file__).parent.parent / "assets" / "style.css"
+
+    css_path = css_enhanced if css_enhanced.exists() else css_original
 
     if css_path.exists():
         with open(css_path) as stylesheet:
             css_content = stylesheet.read()
             # Add unique comment to force browser to recognize CSS changes
             st.markdown(
-                f"<style>/* Battery Analytics Platform CSS */\n{css_content}</style>",
+                f"<style>/* Battery Analytics Platform Enhanced CSS */\n{css_content}</style>",
                 unsafe_allow_html=True
             )
         return
