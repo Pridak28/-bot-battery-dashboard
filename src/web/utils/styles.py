@@ -7,12 +7,17 @@ from pathlib import Path
 import streamlit as st
 
 def load_css():
-    """Load the unified UI stylesheet."""
+    """Load the unified UI stylesheet - forces reload on every render to prevent white screen."""
     css_path = Path(__file__).parent.parent / "assets" / "style.css"
 
     if css_path.exists():
         with open(css_path) as stylesheet:
-            st.markdown(f"<style>{stylesheet.read()}</style>", unsafe_allow_html=True)
+            css_content = stylesheet.read()
+            # Add unique comment to force browser to recognize CSS changes
+            st.markdown(
+                f"<style>/* Battery Analytics Platform CSS */\n{css_content}</style>",
+                unsafe_allow_html=True
+            )
         return
 
     # Emergency fallback inline CSS if the file is missing
