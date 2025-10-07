@@ -171,8 +171,7 @@ class BatteryDataContext:
                                 "spread": float(df[price_col].max() - df[price_col].min()),
                             },
                             "arbitrage_opportunity": {
-                                "daily_spread": float(df[price_col].resample('D', on=pd.to_datetime(df['date'])).max().mean() -
-                                                     df[price_col].resample('D', on=pd.to_datetime(df['date'])).min().mean()) if 'date' in df.columns else 0,
+                                "daily_spread": self._calculate_daily_spread(df, price_col),
                                 "best_hours_buy": self._get_best_hours(df, price_col, 'buy'),
                                 "best_hours_sell": self._get_best_hours(df, price_col, 'sell'),
                             }
@@ -183,6 +182,26 @@ class BatteryDataContext:
             pzu_context["error"] = str(e)
 
         return pzu_context
+
+    def _calculate_daily_spread(self, df: pd.DataFrame, price_col: str) -> float:
+        """Calculate average daily price spread"""
+        try:
+            if 'date' not in df.columns:
+                return 0.0
+
+            # Create a copy to avoid modifying original
+            df_copy = df.copy()
+            df_copy['date'] = pd.to_datetime(df_copy['date'])
+            df_copy.set_index('date', inplace=True)
+
+            # Group by day and calculate spread
+            daily_max = df_copy[price_col].resample('D').max()
+            daily_min = df_copy[price_col].resample('D').min()
+            daily_spread = daily_max - daily_min
+
+            return float(daily_spread.mean())
+        except:
+            return 0.0
 
     def _get_best_hours(self, df: pd.DataFrame, price_col: str, direction: str) -> List[int]:
         """Identify best hours for buy/sell operations"""
