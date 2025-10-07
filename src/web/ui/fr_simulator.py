@@ -13,6 +13,7 @@ from src.web.data import (
     build_hedge_price_curve,
     find_in_data_dir,
     list_in_data_dir,
+    require_any_data_file,
     require_data_file,
     load_system_imbalance_from_excel,
     load_transelectrica_imbalance_from_excel,
@@ -950,7 +951,14 @@ def render_frequency_regulation_simulator(
         col1, col2, col3 = st.columns([1, 1, 1])
 
         with col1:
-            forecast_days_fr = st.slider("Forecast Period (days)", 7, 365, 90, 7, key="fr_forecast_days")
+            forecast_days_fr = st.slider(
+                "Forecast Period (days)",
+                min_value=7,
+                max_value=365,
+                value=90,
+                step=1,
+                key="fr_forecast_days",
+            )
 
         with col2:
             # Get operating cost from config
