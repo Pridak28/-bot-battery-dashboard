@@ -14,7 +14,7 @@ from ...tools.aggregate_imbalance_manual import (
     _normalize as _imb_normalize,
     _read_any as _imb_read_any,
 )
-from src.web.config import project_root
+from ..config import project_root
 
 
 def load_config(path: str) -> dict:
