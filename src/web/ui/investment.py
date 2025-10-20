@@ -228,18 +228,24 @@ def render_investment_financing_analysis(cfg: dict) -> None:
             fr_months_df = fr_months_df[fr_months_df["year"].isin(fr_year_range)]
 
             if not fr_months_df.empty:
-                # Group by year and sum revenues/costs
+                # Group by year and sum revenues/costs, counting months per year
                 yearly_fr = fr_months_df.groupby("year").agg({
                     "total_revenue_eur": "sum",
-                    "energy_cost_eur": "sum"
-                }).reset_index()
+                    "energy_cost_eur": "sum",
+                    "month_period": "count"  # Count months per year
+                }).rename(columns={"month_period": "months_count"}).reset_index()
 
                 fr_years_count = len(yearly_fr)
 
-                # Calculate average annual values
+                # Calculate average annual values (annualize partial years)
                 if fr_years_count > 0:
-                    fr_gross_revenue = float(yearly_fr["total_revenue_eur"].mean())
-                    fr_energy_cost = float(yearly_fr["energy_cost_eur"].mean())
+                    # Annualize each year's data (multiply by 12/months_in_year)
+                    yearly_fr["annualized_revenue"] = yearly_fr["total_revenue_eur"] * (12.0 / yearly_fr["months_count"])
+                    yearly_fr["annualized_cost"] = yearly_fr["energy_cost_eur"] * (12.0 / yearly_fr["months_count"])
+
+                    # Average across all annualized years
+                    fr_gross_revenue = float(yearly_fr["annualized_revenue"].mean())
+                    fr_energy_cost = float(yearly_fr["annualized_cost"].mean())
 
     fr_base_net = fr_gross_revenue - fr_energy_cost
     fr_net_after_opex = fr_base_net - fr_operating_cost_annual
@@ -262,14 +268,21 @@ def render_investment_financing_analysis(cfg: dict) -> None:
             pzu_df = pzu_df[pzu_df["year"].isin(pzu_year_range)]
 
             if not pzu_df.empty:
-                # Group by year and sum daily profits
-                yearly_pzu = pzu_df.groupby("year")["daily_profit_eur"].sum().reset_index()
+                # Group by year and sum daily profits, counting days per year
+                yearly_pzu = pzu_df.groupby("year").agg({
+                    "daily_profit_eur": "sum",
+                    "date": "count"  # Count days per year
+                }).rename(columns={"date": "days_count"}).reset_index()
 
                 pzu_years_count = len(yearly_pzu)
 
-                # Calculate average annual profit
+                # Calculate average annual profit (annualize partial years based on days)
                 if pzu_years_count > 0:
-                    pzu_base_net = float(yearly_pzu["daily_profit_eur"].mean())
+                    # Annualize each year's data (multiply by 365/days_in_year)
+                    yearly_pzu["annualized_profit"] = yearly_pzu["daily_profit_eur"] * (365.0 / yearly_pzu["days_count"])
+
+                    # Average across all annualized years
+                    pzu_base_net = float(yearly_pzu["annualized_profit"].mean())
 
     pzu_net_after_opex = pzu_base_net - pzu_operating_cost_annual
     pzu_net_after_debt = pzu_net_after_opex - pzu_annual_debt_service
