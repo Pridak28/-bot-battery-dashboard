@@ -290,7 +290,7 @@ def render_battery_assistant(cfg: dict):
         )
 
     with col2:
-        ask_button = st.button("Ask", type="primary", width='stretch')
+        ask_button = st.button("Ask", type="primary", use_container_width=True)
 
     # Quick questions
     st.markdown("**Quick Questions:**")
@@ -305,7 +305,7 @@ def render_battery_assistant(cfg: dict):
 
     for i, quick_q in enumerate(quick_questions):
         with quick_cols[i]:
-            if st.button(quick_q, key=f"quick_{i}", width='stretch'):
+            if st.button(quick_q, key=f"quick_{i}", use_container_width=True):
                 user_question = quick_q
                 ask_button = True
 

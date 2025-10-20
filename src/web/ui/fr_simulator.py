@@ -43,18 +43,19 @@ def render_frequency_regulation_simulator(
     # Default float decimals for non-currency numeric columns
     float_decimals = 2
 
-    # Use global styling - NO inline CSS
+    # Use the existing section_header from styles
     section_header("Frequency Regulation Revenue Simulator")
 
     # Clear cache button
-    if st.button("🔄 Clear Session Cache & Reload Data", key="clear_fr_cache"):
+    if st.button("Clear Session Cache & Reload Data", key="clear_fr_cache"):
         for key in list(st.session_state.keys()):
             if 'fr_' in key.lower() or 'market' in key.lower():
                 del st.session_state[key]
         st.cache_data.clear()
-        st.success("✅ Session cache cleared! Click 'Compute Revenue' to regenerate with fresh data.")
+        st.success("Session cache cleared! Click 'Compute Revenue' to regenerate with fresh data.")
         st.rerun()
 
+    # Use info-banner class from existing CSS
     st.markdown("""
         <div class="info-banner">
             <strong>Revenue Model:</strong> Capacity payments (€/MW/h) + Activation energy (€/MWh)<br>
@@ -153,58 +154,70 @@ def render_frequency_regulation_simulator(
         excel_currency = st.selectbox("Excel currency", options=["RON","EUR"], index=0)
         fx_rate = st.number_input("FX RON/EUR", min_value=1.0, max_value=10.0, value=cfg_fx, step=0.1, help="Used if Excel prices are in RON/MWh")
 
+    # Product Selection section using existing CSS
     st.markdown('<div class="section-header">Product Selection</div>', unsafe_allow_html=True)
 
-    # Simple product selection - choose ONE product
     product_choice = st.radio(
-        "Select frequency regulation product:",
-        options=["aFRR (Automatic Frequency Restoration)", "FCR (Frequency Containment)"],
+        "Select Product",
+        options=[
+            "aFRR (Automatic Frequency Restoration)",
+            "FCR (Frequency Containment)",
+            "mFRR (Manual Frequency Restoration)"
+        ],
         index=0,
-        help="Choose which product to simulate. You can allocate any capacity up to battery power limit."
+        label_visibility="hidden",
+        help="Each product has different technical requirements and market characteristics"
     )
 
     # Determine which product is selected
-    selected_product = "aFRR" if "aFRR" in product_choice else "FCR"
+    if "aFRR" in product_choice:
+        selected_product = "aFRR"
+    elif "FCR" in product_choice:
+        selected_product = "FCR"
+    else:
+        selected_product = "mFRR"
 
-    # Product-specific settings (simplified)
+    # Product Configuration section using existing CSS
     st.markdown('<div class="section-header">Product Configuration</div>', unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
 
-    # Contracted MW (how much capacity to sell to TSO)
+    # Contracted MW
     with col1:
+
         contracted_mw = st.number_input(
             "Contracted MW",
             min_value=1.0,
             max_value=200.0,
             value=power_mw,  # Default to full battery power
             step=1.0,
-            help=f"How much capacity to contract (max: {power_mw:.1f} MW = full battery power)"
+            help=f"Amount of battery capacity to reserve for {selected_product} service (max: {power_mw:.1f} MW)"
         )
 
         if contracted_mw > power_mw:
-            st.warning(f"WARNING: Contracted MW ({contracted_mw:.1f}) exceeds battery power ({power_mw:.1f} MW)")
+            st.error(f"⚠️ Contracted MW ({contracted_mw:.1f}) exceeds battery power ({power_mw:.1f} MW)")
 
     # Product-specific parameters
     if selected_product == "aFRR":
         with col2:
             afrr_cap = st.number_input(
-                "Capacity price (€/MW/h)",
+                "Capacity Price (€/MW/h)",
                 min_value=0.0,
                 max_value=50.0,
                 value=5.0,
                 step=0.5,
-                help="Availability payment per MW per hour (typical: 5-10 €/MW/h)"
+                help="Hourly availability payment • Market range: €5-10/MW/h"
             )
         with col3:
             afrr_act = st.number_input(
-                "Activation factor (0-1)",
+                "Activation Factor (%)",
                 min_value=0.0,
-                max_value=1.0,
-                value=0.10,
-                step=0.01,
-                help="How much of capacity is typically activated (10% = realistic for aFRR)"
-            )
+                max_value=100.0,
+                value=10.0,
+                step=1.0,
+                format="%.1f",
+                help="Expected dispatch frequency • Typical: 10-15%"
+            ) / 100.0  # Convert percentage to decimal
 
         # Use contracted MW for aFRR
         products_cfg = {
@@ -215,25 +228,26 @@ def render_frequency_regulation_simulator(
         paydown_map = {'FCR': True, 'aFRR': True, 'mFRR': True}
         act_map = {'FCR': 0, 'aFRR': afrr_act, 'mFRR': 0}
 
-    else:  # FCR
+    elif selected_product == "FCR":
         with col2:
             fcr_cap = st.number_input(
-                "Capacity price (€/MW/h)",
+                "Capacity Price (€/MW/h)",
                 min_value=0.0,
                 max_value=50.0,
                 value=7.5,
                 step=0.5,
-                help="Availability payment per MW per hour (typical: 7-10 €/MW/h)"
+                help="Hourly availability payment • Market range: €7-10/MW/h"
             )
         with col3:
             fcr_act = st.number_input(
-                "Activation factor (0-1)",
+                "Activation Factor (%)",
                 min_value=0.0,
-                max_value=1.0,
-                value=0.05,
-                step=0.01,
-                help="How much of capacity is typically activated (5% = realistic for FCR)"
-            )
+                max_value=100.0,
+                value=5.0,
+                step=0.5,
+                format="%.1f",
+                help="Expected dispatch frequency • Typical: 5-7%"
+            ) / 100.0  # Convert percentage to decimal
 
         # Use contracted MW for FCR
         products_cfg = {
@@ -243,6 +257,36 @@ def render_frequency_regulation_simulator(
         }
         paydown_map = {'FCR': True, 'aFRR': True, 'mFRR': True}
         act_map = {'FCR': fcr_act, 'aFRR': 0, 'mFRR': 0}
+
+    else:  # mFRR
+        with col2:
+            mfrr_cap = st.number_input(
+                "Capacity Price (€/MW/h)",
+                min_value=0.0,
+                max_value=50.0,
+                value=3.0,
+                step=0.5,
+                help="Hourly availability payment • Market range: €2-5/MW/h"
+            )
+        with col3:
+            mfrr_act = st.number_input(
+                "Activation Factor (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=5.0,
+                step=0.5,
+                format="%.1f",
+                help="Expected dispatch frequency • Typical: 3-7%"
+            ) / 100.0  # Convert percentage to decimal
+
+        # Use contracted MW for mFRR
+        products_cfg = {
+            'FCR': {'enabled': False, 'mw': 0, 'cap_eur_mw_h': 0, 'up_thr': 0, 'down_thr': 0},
+            'aFRR': {'enabled': False, 'mw': 0, 'cap_eur_mw_h': 0, 'up_thr': 0, 'down_thr': 0},
+            'mFRR': {'enabled': True, 'mw': contracted_mw, 'cap_eur_mw_h': mfrr_cap, 'up_thr': 0, 'down_thr': 0},
+        }
+        paydown_map = {'FCR': True, 'aFRR': True, 'mFRR': True}
+        act_map = {'FCR': 0, 'aFRR': 0, 'mFRR': mfrr_act}
 
     # Advanced settings (hidden in expander)
     with st.expander("Advanced Settings", expanded=False):
@@ -299,51 +343,59 @@ def render_frequency_regulation_simulator(
     # No calendars in simplified mode - removed for clarity
     calendars_cfg: Dict[str, pd.DataFrame] = {}
 
-    # Professional capacity allocation dashboard
+    # Configuration Summary
     st.markdown('<div class="section-header">Configuration Summary</div>', unsafe_allow_html=True)
 
     allocation_pct = (contracted_mw / power_mw * 100) if power_mw > 0 else 0
-    capacity_price = afrr_cap if selected_product == "aFRR" else fcr_cap
-    activation_factor = afrr_act if selected_product == "aFRR" else fcr_act
+    if selected_product == "aFRR":
+        capacity_price = afrr_cap
+        activation_factor = afrr_act
+    elif selected_product == "FCR":
+        capacity_price = fcr_cap
+        activation_factor = fcr_act
+    else:  # mFRR
+        capacity_price = mfrr_cap
+        activation_factor = mfrr_act
 
-    # Professional KPI cards using custom HTML
-    kpi_html = f"""
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 1.5rem 0;">
-        <div class="kpi-card">
-            <div class="kpi-label">Battery Power</div>
-            <div class="kpi-value">{power_mw:.1f} MW</div>
-            <div class="kpi-delta">Maximum inverter capacity</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Contracted Capacity</div>
-            <div class="kpi-value">{contracted_mw:.1f} MW</div>
-            <div class="kpi-delta">{allocation_pct:.0f}% utilization</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Capacity Price</div>
-            <div class="kpi-value">€{capacity_price:.2f}/MW/h</div>
-            <div class="kpi-delta">Availability payment rate</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Activation Factor</div>
-            <div class="kpi-value">{activation_factor*100:.0f}%</div>
-            <div class="kpi-delta">Expected activation intensity</div>
-        </div>
-    </div>
-    """
-    st.markdown(kpi_html, unsafe_allow_html=True)
+    # KPI cards using existing CSS classes
+    from src.web.utils.styles import kpi_card, kpi_grid
 
-    # Status indicator with color coding (no emojis)
+    cards = [
+        kpi_card(
+            "Battery Power",
+            f"{power_mw:.1f} MW",
+            "Maximum inverter capacity"
+        ),
+        kpi_card(
+            "Contracted Capacity",
+            f"{contracted_mw:.1f} MW",
+            f"{allocation_pct:.0f}% utilization"
+        ),
+        kpi_card(
+            "Capacity Price",
+            f"€{capacity_price:.2f}/MW/h",
+            "Availability payment"
+        ),
+        kpi_card(
+            "Activation Rate",
+            f"{activation_factor*100:.1f}%",
+            "Expected dispatch frequency"
+        ),
+    ]
+
+    kpi_grid(cards, columns=4)
+
+    # Status indicators using Streamlit native components
     if contracted_mw > power_mw:
-        st.error(f"**OVERSUBSCRIBED**: Contracted capacity ({contracted_mw:.1f} MW) exceeds battery power ({power_mw:.1f} MW)")
+        st.error(f"**Configuration Error:** Contracted capacity ({contracted_mw:.1f} MW) exceeds battery power ({power_mw:.1f} MW)")
     elif allocation_pct == 100:
-        st.success(f"**FULL UTILIZATION**: {selected_product} using 100% battery capacity ({contracted_mw:.1f} MW)")
+        st.success(f"**Full Utilization:** {selected_product} using 100% of battery capacity")
     elif allocation_pct >= 80:
-        st.success(f"**HIGH UTILIZATION**: {selected_product} using {allocation_pct:.0f}% of battery capacity ({contracted_mw:.1f}/{power_mw:.1f} MW)")
+        st.success(f"**High Utilization:** {selected_product} using {allocation_pct:.0f}% of battery capacity")
     elif allocation_pct >= 50:
-        st.info(f"**MODERATE UTILIZATION**: {selected_product} using {allocation_pct:.0f}% of battery capacity ({contracted_mw:.1f}/{power_mw:.1f} MW)")
+        st.info(f"**Moderate Utilization:** {selected_product} using {allocation_pct:.0f}% of battery capacity")
     else:
-        st.warning(f"**LOW UTILIZATION**: {selected_product} using only {allocation_pct:.0f}% of battery capacity ({contracted_mw:.1f}/{power_mw:.1f} MW)")
+        st.warning(f"**Low Utilization:** {selected_product} using only {allocation_pct:.0f}% of battery capacity")
 
     # Battery specs moved to sidebar configuration - removed for simplicity
     cap_power_mw = power_mw  # Use config power for capacity calculations
@@ -708,7 +760,7 @@ def render_frequency_regulation_simulator(
                                     'Percentage': '{:.1f}%'
                                 }),
                                 hide_index=True,
-                                width='stretch'
+                                use_container_width=True
                             )
 
                         with chart_col2:
@@ -722,7 +774,7 @@ def render_frequency_regulation_simulator(
                             else:
                                 st.line_chart(
                                     trends_to_plot,
-                                    width='stretch'
+                                    use_container_width=True
                                 )
 
                         # Detailed monthly data in collapsible section
@@ -730,7 +782,7 @@ def render_frequency_regulation_simulator(
                         with st.expander("Monthly Breakdown Table", expanded=False):
                             st.markdown("**Full monthly revenue data with all metrics**")
                             if show_raw_tables:
-                                st.dataframe(comb_df, width='stretch')
+                                st.dataframe(comb_df, use_container_width=True)
                             else:
                                 st.dataframe(
                                     styled_table(
@@ -741,7 +793,7 @@ def render_frequency_regulation_simulator(
                                         float_decimals=float_decimals,
                                         thousands=thousands_sep,
                                     ),
-                                    width='stretch',
+                                    use_container_width=True,
                                 )
 
                         try:
@@ -892,7 +944,7 @@ def render_frequency_regulation_simulator(
                             if monthly_rows:
                                 monthly_df = pd.DataFrame(monthly_rows)
                                 section_header("FR Monthly Cash Flow (all months)")
-                                st.dataframe(monthly_df, width='stretch')
+                                st.dataframe(monthly_df, use_container_width=True)
                 else:
                     st.session_state.pop("fr_market_metrics", None)
 
@@ -907,7 +959,7 @@ def render_frequency_regulation_simulator(
                             currency_cols = ['capacity_revenue_eur','activation_revenue_eur','total_revenue_eur']
                             float_cols = ['hours_in_data']
                             if show_raw_tables:
-                                st.dataframe(prod_df, width='stretch')
+                                st.dataframe(prod_df, use_container_width=True)
                             else:
                                 st.dataframe(
                                     styled_table(
@@ -918,7 +970,7 @@ def render_frequency_regulation_simulator(
                                         float_decimals=float_decimals,
                                         thousands=thousands_sep,
                                     ),
-                                    width='stretch',
+                                    use_container_width=True,
                                 )
                             totp = simm['totals_by_product'].get(prod, {})
                             p1, p2, p3 = st.columns(3)
@@ -1118,7 +1170,7 @@ def render_frequency_regulation_simulator(
                             'Operating Cost (EUR)': '{:,.2f}',
                             'Net Profit (EUR)': '{:,.2f}',
                         }),
-                        width='stretch',
+                        use_container_width=True,
                         height=400
                     )
 

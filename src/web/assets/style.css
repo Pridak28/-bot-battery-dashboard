@@ -89,7 +89,7 @@ body {
 /* Main content area - Better spacing */
 .main .block-container {
     max-width: 1600px !important;
-    padding: 2rem 2rem 3rem !important;
+    padding: 2.5rem 2.5rem 3rem !important;
 }
 
 /* ============================================================================
@@ -401,12 +401,13 @@ a {
 [data-testid="stMetric"] {
     background: var(--bg-card) !important;
     border: 2px solid var(--border-light) !important;
-    border-left: 4px solid var(--brand-accent) !important;
+    border-left: 5px solid var(--brand-accent) !important;
     border-radius: var(--radius-md) !important;
-    padding: 1.5rem 1.75rem !important;
-    margin-bottom: 1.5rem !important;
+    padding: 1.625rem 1.75rem !important;
+    margin-bottom: 1.75rem !important;
     box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(37, 99, 235, 0.05) !important;
     transition: all 0.3s ease !important;
+    min-height: 110px !important;
 }
 
 [data-testid="stMetric"]:hover {
@@ -534,11 +535,12 @@ div[data-baseweb="notification"][kind="info"],
 }
 
 [data-testid="stExpanderDetails"] {
-    margin-top: 0.5rem !important;
-    padding: 1.25rem !important;
+    margin-top: 0 !important;
+    padding: 1.5rem !important;
     background: var(--bg-card-alt) !important;
     border: 2px solid var(--border-light) !important;
-    border-radius: var(--radius-md) !important;
+    border-top: none !important;
+    border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
     box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.05) !important;
 }
 
@@ -560,19 +562,22 @@ div[data-baseweb="notification"][kind="info"],
     background: linear-gradient(135deg, #eff4fb 0%, #e8eef9 100%) !important;
     color: var(--brand-primary) !important;
     font-weight: 700 !important;
-    font-size: 0.6875rem !important;
+    font-size: 0.75rem !important;
     text-transform: uppercase !important;
-    letter-spacing: 0.12em !important;
+    letter-spacing: 0.1em !important;
     border-bottom: 3px solid var(--brand-accent) !important;
-    padding: 1rem !important;
+    padding: 1.125rem 1rem !important;
+    white-space: nowrap !important;
 }
 
-/* Table cells */
+/* Table cells - Better padding and readability */
 [data-testid="stDataFrame"] td {
     color: var(--text-secondary) !important;
     border-bottom: 1px solid var(--border-light) !important;
-    padding: 0.875rem !important;
+    padding: 1rem 0.875rem !important;
     background: var(--bg-card) !important;
+    font-size: 0.875rem !important;
+    line-height: 1.4 !important;
 }
 
 [data-testid="stDataFrame"] tr:hover td {
@@ -781,26 +786,62 @@ div[data-baseweb="notification"][kind="info"],
    ============================================================================ */
 
 /* Better spacing for text areas (AI responses) */
+.stTextArea textarea {
+    line-height: 1.5 !important;
+    font-size: 0.875rem !important;
+}
+
 .stTextArea textarea:disabled {
     background: var(--bg-card-alt) !important;
     opacity: 1 !important;
+    color: var(--text-primary) !important;
 }
 
 /* Scrollable containers */
 [data-testid="stVerticalBlock"] > div[style*="height"] {
-    padding: 0.5rem !important;
+    padding: 1rem !important;
     overflow-y: auto !important;
+    border: 1px solid var(--border-light) !important;
+    border-radius: var(--radius-sm) !important;
+    background: var(--bg-card-alt) !important;
 }
 
 /* Better column spacing */
 [data-testid="column"] {
-    padding: 0 0.5rem !important;
+    padding: 0 0.625rem !important;
+}
+
+/* Space between vertical blocks */
+div[data-testid="stVerticalBlock"] > div:not([data-testid]) {
+    margin-bottom: 1.25rem !important;
 }
 
 /* Improved divider spacing */
 [data-testid="stHorizontalBlock"] > hr,
 hr {
+    margin: 1.75rem 0 !important;
+    border-color: var(--border-light) !important;
+}
+
+/* Better spacing for headers */
+h1, h2, h3 {
+    margin-top: 1.5rem !important;
+    margin-bottom: 1rem !important;
+}
+
+/* Plotly chart containers */
+[data-testid="stPlotlyChart"] {
     margin: 1.5rem 0 !important;
+    padding: 1rem !important;
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-light) !important;
+    border-radius: var(--radius-md) !important;
+}
+
+/* Code blocks */
+.stCodeBlock,
+[data-testid="stCode"] {
+    margin: 1.25rem 0 !important;
 }
 
 /* ============================================================================

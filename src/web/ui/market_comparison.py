@@ -207,7 +207,7 @@ def render_historical_market_comparison(
     pzu_display["Profit €"] = pzu_display["Profit €"].apply(
         lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep)
     )
-    st.dataframe(pzu_display, width='stretch')
+    st.dataframe(pzu_display, use_container_width=True)
 
     if not fr_window.empty:
         section_header("FR Monthly Detail")
@@ -228,7 +228,7 @@ def render_historical_market_comparison(
             fr_display[col] = fr_display[col].apply(
                 lambda v: format_currency(v, decimals=currency_decimals, thousands=thousands_sep)
             )
-        st.dataframe(fr_display, width='stretch')
+        st.dataframe(fr_display, use_container_width=True)
 
         annual_info = fr_metrics.get("annual") if isinstance(fr_metrics, dict) else None
         three_year_info = fr_metrics.get("three_year") if isinstance(fr_metrics, dict) else None
