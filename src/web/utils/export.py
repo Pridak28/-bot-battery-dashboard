@@ -941,34 +941,253 @@ def add_export_buttons(
     """
 
     st.markdown("---")
-    st.markdown("### 📊 Export Investment Banking Package")
+    st.markdown("## 📊 Investment Banking Financial Package")
+    st.markdown("### Professional 15-Sheet Excel Model for Senior Debt Financing")
 
-    col1, col2 = st.columns([3, 1])
+    # Calculate key metrics for preview
+    if fr_metrics and "annual" in fr_metrics:
+        fr_annual = fr_metrics["annual"]
 
-    with col1:
-        st.markdown("""
-        **JP Morgan-Level Financial Model (15 Sheets)**
+        # Calculate equity cashflows for IRR
+        cashflows = []
+        cumulative = -equity_eur
+        cashflows.append(-equity_eur)
 
-        Comprehensive financial package including:
-        - Transaction Summary & Sources/Uses
-        - Historical Operating Performance
-        - 15-Year Integrated Cashflow Model
-        - Debt Sizing & Coverage Analysis (DSCR)
-        - Returns Analysis (IRR, NPV, MOIC, Payback)
-        - Sensitivity & Scenario Analysis
-        - Market Benchmarks & Assumptions
-        - Detailed OPEX & Revenue Breakdown
-        - Risk Register with Quantified Mitigation
-        - Macroeconomic & FX Assumptions
-        - Comparable Transactions
-        - Monthly Debt Amortization Schedule
-        - Technical Specifications
-        - Development Timeline & Critical Path
+        for year in range(1, 16):
+            revenue = fr_annual.get("total", 0) * (1.02 ** (year - 1))
+            energy_cost = fr_annual.get("energy_cost", 0) * (1.02 ** (year - 1))
+            opex = fr_opex_annual * (1.025 ** (year - 1))
+            ebitda = revenue - energy_cost - opex
 
-        **Perfect for:** Senior debt financing, institutional investors, credit committees
-        """)
+            capex = -investment_eur * 0.10 if year == 6 else 0
+            debt_svc = fr_annual.get("debt", 0) if year <= loan_term_years else 0
 
-    with col2:
+            fcf = ebitda + capex - debt_svc
+            cumulative += fcf
+            cashflows.append(fcf)
+
+        # Calculate IRR
+        equity_irr = calculate_irr(cashflows) * 100
+
+        # Calculate DSCR
+        avg_dscr = 0
+        min_dscr = 999
+        for year in range(1, min(loan_term_years + 1, 16)):
+            revenue = fr_annual.get("total", 0) * (1.02 ** (year - 1))
+            energy_cost = fr_annual.get("energy_cost", 0) * (1.02 ** (year - 1))
+            opex = fr_opex_annual * (1.025 ** (year - 1))
+            ebitda = revenue - energy_cost - opex
+            debt_svc = fr_annual.get("debt", 0)
+
+            if debt_svc > 0:
+                dscr = ebitda / debt_svc
+                avg_dscr += dscr
+                min_dscr = min(min_dscr, dscr)
+
+        avg_dscr = avg_dscr / loan_term_years if loan_term_years > 0 else 0
+
+        # Calculate MOIC
+        total_distributions = sum(cf for cf in cashflows[1:] if cf > 0)
+        moic = total_distributions / equity_eur if equity_eur > 0 else 0
+
+        # Payback
+        payback = next((i for i, val in enumerate(cashflows) if sum(cashflows[:i+1]) > 0), None)
+
+        # Display professional preview
+        st.markdown("#### 📈 Financial Highlights Preview")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric(
+                "Equity IRR",
+                f"{equity_irr:.1f}%",
+                help="Levered internal rate of return on equity investment"
+            )
+
+        with col2:
+            st.metric(
+                "Min DSCR",
+                f"{min_dscr:.2f}x",
+                delta="PASS" if min_dscr >= 1.20 else "FAIL",
+                delta_color="normal" if min_dscr >= 1.20 else "inverse",
+                help="Minimum Debt Service Coverage Ratio (target: ≥1.20x)"
+            )
+
+        with col3:
+            st.metric(
+                "MOIC",
+                f"{moic:.2f}x",
+                help="Multiple on Invested Capital over 15 years"
+            )
+
+        with col4:
+            st.metric(
+                "Payback",
+                f"{payback} years" if payback else "N/A",
+                help="Equity payback period"
+            )
+
+        st.markdown("")
+
+        # Investment structure table
+        st.markdown("#### 💰 Transaction Structure")
+
+        structure_data = {
+            "Component": [
+                "Total Investment",
+                "Senior Debt",
+                "Sponsor Equity",
+                "Debt/Total Cost",
+                "Interest Rate",
+                "Loan Term"
+            ],
+            "Amount / Rate": [
+                format_currency(investment_eur),
+                format_currency(debt_eur),
+                format_currency(equity_eur),
+                f"{(debt_eur/investment_eur)*100:.0f}%",
+                f"{interest_rate*100:.2f}%",
+                f"{loan_term_years} years"
+            ],
+            "Notes": [
+                f"{capacity_mwh:.0f} MWh BESS",
+                f"{(debt_eur/investment_eur)*100:.0f}% leverage",
+                f"{(equity_eur/investment_eur)*100:.0f}% equity",
+                "Target: 70/30",
+                "Fixed rate",
+                "Level amortization"
+            ]
+        }
+
+        st.dataframe(
+            pd.DataFrame(structure_data),
+            hide_index=True,
+            use_container_width=True
+        )
+
+        st.markdown("")
+
+        # Revenue model table
+        st.markdown("#### 💵 Base Case Revenue Model (Annual)")
+
+        revenue_data = {
+            "Line Item": [
+                "Gross Revenue",
+                "  - Capacity Payments",
+                "  - Activation Revenue",
+                "Energy Costs (COGS)",
+                "Gross Margin",
+                "Fixed OPEX",
+                "EBITDA",
+                "Debt Service",
+                "Free Cashflow"
+            ],
+            "Amount (€)": [
+                format_currency(fr_annual.get("total", 0)),
+                format_currency(fr_annual.get("capacity", 0)),
+                format_currency(fr_annual.get("activation", 0)),
+                format_currency(-fr_annual.get("energy_cost", 0)),
+                format_currency(fr_annual.get("total", 0) - fr_annual.get("energy_cost", 0)),
+                format_currency(-fr_opex_annual),
+                format_currency(fr_annual.get("total", 0) - fr_annual.get("energy_cost", 0) - fr_opex_annual),
+                format_currency(-fr_annual.get("debt", 0)),
+                format_currency(fr_annual.get("net", 0))
+            ],
+            "% of Revenue": [
+                "100%",
+                f"{(fr_annual.get('capacity', 0) / fr_annual.get('total', 1)) * 100:.1f}%",
+                f"{(fr_annual.get('activation', 0) / fr_annual.get('total', 1)) * 100:.1f}%",
+                f"{(-fr_annual.get('energy_cost', 0) / fr_annual.get('total', 1)) * 100:.1f}%",
+                f"{((fr_annual.get('total', 0) - fr_annual.get('energy_cost', 0)) / fr_annual.get('total', 1)) * 100:.1f}%",
+                f"{(-fr_opex_annual / fr_annual.get('total', 1)) * 100:.1f}%",
+                f"{((fr_annual.get('total', 0) - fr_annual.get('energy_cost', 0) - fr_opex_annual) / fr_annual.get('total', 1)) * 100:.1f}%",
+                f"{(-fr_annual.get('debt', 0) / fr_annual.get('total', 1)) * 100:.1f}%",
+                f"{(fr_annual.get('net', 0) / fr_annual.get('total', 1)) * 100:.1f}%"
+            ]
+        }
+
+        st.dataframe(
+            pd.DataFrame(revenue_data),
+            hide_index=True,
+            use_container_width=True
+        )
+
+        st.markdown("")
+
+    # Excel contents description
+    st.markdown("#### 📋 Excel Model Contents (15 Comprehensive Sheets)")
+
+    sheets_data = {
+        "Sheet #": list(range(1, 16)),
+        "Sheet Name": [
+            "Transaction Summary",
+            "Historical Data",
+            "15Y Cashflow",
+            "Debt Coverage",
+            "Returns Analysis",
+            "Sensitivity",
+            "Market Benchmarks",
+            "OPEX Detail",
+            "Revenue Model",
+            "Risk Register",
+            "Macro & FX",
+            "Comparables",
+            "Debt Schedule",
+            "Technical Specs",
+            "Timeline"
+        ],
+        "Description": [
+            "Sources & Uses, debt terms, key assumptions",
+            "Actual monthly FR/PZU performance data",
+            "Year-by-year P&L waterfall with escalations & DSCR",
+            "Min/avg DSCR, covenant testing, PASS/FAIL",
+            "Equity IRR, NPV (4 rates), MOIC, payback period",
+            "Revenue/OPEX sensitivity matrix + 5 scenarios",
+            "FR/PZU pricing, comparable transactions, benchmarks",
+            "6-category OPEX split with €/kW metrics",
+            "Capacity/activation split, market drivers",
+            "8 risks with mitigation & residual ratings",
+            "Inflation, FX, interest rates, tax framework",
+            "5 international BESS projects with metrics",
+            "120-month amortization with cumulative tracking",
+            "Battery, PCS, BMS, safety, grid connection",
+            "18-month critical path with permitting"
+        ],
+        "Use For": [
+            "Credit memo, investment committee",
+            "Due diligence validation",
+            "Debt sizing, DSCR covenants",
+            "Credit approval",
+            "Equity investment decision",
+            "Stress testing, downside analysis",
+            "Market positioning",
+            "Operating budget",
+            "Revenue forecasting",
+            "Risk assessment",
+            "FX hedging, tax structuring",
+            "Valuation benchmarking",
+            "Lender amortization table",
+            "Technical due diligence",
+            "Project schedule risk"
+        ]
+    }
+
+    st.dataframe(
+        pd.DataFrame(sheets_data),
+        hide_index=True,
+        use_container_width=True,
+        height=400
+    )
+
+    st.markdown("")
+    st.markdown("**Perfect for:** JP Morgan, Goldman Sachs, Citi, Morgan Stanley presentations | Senior debt syndications | Institutional equity investors")
+    st.markdown("")
+
+    # Download button
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+
+    with col_btn2:
         if st.button("📥 Generate Financial Model", type="primary", use_container_width=True):
             with st.spinner("Generating comprehensive financial model... (15 sheets)"):
                 try:
