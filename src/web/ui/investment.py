@@ -10,6 +10,7 @@ from src.web.data import backfill_fr_monthly_dataframe
 from src.web.utils.formatting import format_currency
 from src.web.utils.styles import section_header, kpi_card, kpi_grid
 from src.web.utils.export import add_export_buttons
+from src.web.utils.business_report import add_business_report_button
 
 
 def render_investment_financing_analysis(cfg: dict) -> None:
@@ -926,4 +927,52 @@ def render_investment_financing_analysis(cfg: dict) -> None:
         pzu_opex_annual=pzu_operating_cost_annual,
         fr_years_analyzed=fr_years_count,
         pzu_years_analyzed=pzu_years_count,
+    )
+
+    # Add professional business overview report (for single project)
+    # NOTE: This is configured for ONE 15 MWh project (not 3 projects)
+    battery_cfg = cfg.get("battery", {})
+    single_project_capacity = float(battery_cfg.get("capacity_mwh", 55.0)) / 3.0  # Divide by 3 for single project
+    single_project_power = float(battery_cfg.get("power_mw", 25.0)) / 3.0  # Divide by 3 for single project
+    single_project_investment = total_investment / 3.0  # Investment for ONE project
+    single_project_equity = fr_equity / 3.0
+    single_project_debt = fr_debt / 3.0
+
+    # Scale FR/PZU metrics for single project (divide by 3)
+    single_fr_metrics = None
+    if fr_metrics:
+        single_fr_metrics = {
+            "annual": {
+                "total": fr_metrics.get("annual", {}).get("total", 0) / 3.0,
+                "capacity": fr_metrics.get("annual", {}).get("capacity", 0) / 3.0,
+                "activation": fr_metrics.get("annual", {}).get("activation", 0) / 3.0,
+                "energy_cost": fr_metrics.get("annual", {}).get("energy_cost", 0) / 3.0,
+                "debt": fr_metrics.get("annual", {}).get("debt", 0) / 3.0,
+                "net": fr_metrics.get("annual", {}).get("net", 0) / 3.0,
+            }
+        }
+
+    single_pzu_metrics = None
+    if pzu_metrics:
+        single_pzu_metrics = {
+            "annual": {
+                "total": pzu_metrics.get("annual", {}).get("total", 0) / 3.0,
+                "debt": pzu_metrics.get("annual", {}).get("debt", 0) / 3.0,
+                "net": pzu_metrics.get("annual", {}).get("net", 0) / 3.0,
+            }
+        }
+
+    add_business_report_button(
+        project_name="Battery Energy Storage Project #1",
+        capacity_mwh=single_project_capacity,
+        power_mw=single_project_power,
+        investment_eur=single_project_investment,
+        equity_eur=single_project_equity,
+        debt_eur=single_project_debt,
+        loan_term_years=loan_term_years,
+        interest_rate=interest_rate,
+        fr_metrics=single_fr_metrics,
+        pzu_metrics=single_pzu_metrics,
+        fr_opex_annual=fr_operating_cost_annual / 3.0,
+        pzu_opex_annual=pzu_operating_cost_annual / 3.0,
     )
