@@ -30,6 +30,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
+from src.web.utils.translations import get_text, format_currency as format_currency_i18n
+
 
 def format_currency(value: float) -> str:
     """Format currency for display"""
@@ -810,6 +812,7 @@ def export_financial_package_to_excel(
     pzu_opex_annual: float,
     fr_years_analyzed: int,
     pzu_years_analyzed: int,
+    language: str = "en",
 ) -> bytes:
     """
     Export comprehensive JP Morgan-level financial model to Excel
@@ -841,12 +844,12 @@ def export_financial_package_to_excel(
             capacity_mwh, power_mw, investment_eur, equity_eur, debt_eur,
             loan_term_years, interest_rate
         )
-        trans_summary.to_excel(writer, sheet_name="1_Transaction Summary", index=False, header=False)
+        trans_summary.to_excel(writer, sheet_name=get_text("sheet_transaction", language), index=False, header=False)
 
         # Sheet 2: Historical Performance
         if fr_metrics or pzu_metrics:
             historical = create_historical_performance(fr_metrics, pzu_metrics)
-            historical.to_excel(writer, sheet_name="2_Historical Data", index=False, header=False)
+            historical.to_excel(writer, sheet_name=get_text("sheet_historical", language), index=False, header=False)
 
         # Sheet 3: 15-Year Cashflow
         if fr_metrics and "annual" in fr_metrics:
@@ -860,15 +863,15 @@ def export_financial_package_to_excel(
                 equity_eur=equity_eur,
                 loan_term_years=loan_term_years,
             )
-            cashflow_15y.to_excel(writer, sheet_name="3_Cashflow 15Y", index=False)
+            cashflow_15y.to_excel(writer, sheet_name=get_text("sheet_cashflow", language), index=False)
 
             # Sheet 4: Debt Coverage
             debt_coverage = create_debt_coverage_analysis(cashflow_15y, debt_eur)
-            debt_coverage.to_excel(writer, sheet_name="4_Debt Coverage", index=False, header=False)
+            debt_coverage.to_excel(writer, sheet_name=get_text("sheet_debt_coverage", language), index=False, header=False)
 
             # Sheet 5: Returns Analysis
             returns = create_returns_analysis(cashflow_15y, equity_eur, investment_eur)
-            returns.to_excel(writer, sheet_name="5_Returns Analysis", index=False, header=False)
+            returns.to_excel(writer, sheet_name=get_text("sheet_returns", language), index=False, header=False)
 
             # Sheet 6: Sensitivity Analysis
             sensitivity = create_sensitivity_analysis(
@@ -878,44 +881,44 @@ def export_financial_package_to_excel(
                 fr_annual.get("debt", 0),
                 equity_eur,
             )
-            sensitivity.to_excel(writer, sheet_name="6_Sensitivity", index=False, header=False)
+            sensitivity.to_excel(writer, sheet_name=get_text("sheet_sensitivity", language), index=False, header=False)
 
         # Sheet 7: Market Benchmarks
         benchmarks = create_market_benchmarks(capacity_mwh)
-        benchmarks.to_excel(writer, sheet_name="7_Market Benchmarks", index=False, header=False)
+        benchmarks.to_excel(writer, sheet_name=get_text("sheet_benchmarks", language), index=False, header=False)
 
         # Sheet 8: OPEX Breakdown
         opex_detail = create_opex_breakdown(fr_opex_annual, power_mw)
-        opex_detail.to_excel(writer, sheet_name="8_OPEX Detail", index=False, header=False)
+        opex_detail.to_excel(writer, sheet_name=get_text("sheet_opex", language), index=False, header=False)
 
         # Sheet 9: Revenue Assumptions
         revenue_assumptions = create_revenue_assumptions(fr_metrics)
-        revenue_assumptions.to_excel(writer, sheet_name="9_Revenue Model", index=False, header=False)
+        revenue_assumptions.to_excel(writer, sheet_name=get_text("sheet_revenue", language), index=False, header=False)
 
         # Sheet 10: Risk Register
         risks = create_risk_register(investment_eur)
-        risks.to_excel(writer, sheet_name="10_Risk Register", index=False, header=False)
+        risks.to_excel(writer, sheet_name=get_text("sheet_risks", language), index=False, header=False)
 
         # Sheet 11: Macro Assumptions
         macro = create_macro_assumptions()
-        macro.to_excel(writer, sheet_name="11_Macro & FX", index=False, header=False)
+        macro.to_excel(writer, sheet_name=get_text("sheet_macro", language), index=False, header=False)
 
         # Sheet 12: Comparable Projects
         comps = create_comparable_projects()
-        comps.to_excel(writer, sheet_name="12_Comparables", index=False, header=False)
+        comps.to_excel(writer, sheet_name=get_text("sheet_comparables", language), index=False, header=False)
 
         # Sheet 13: Monthly Debt Schedule
         debt_schedule = create_monthly_debt_schedule(debt_eur, interest_rate, loan_term_years)
         if not debt_schedule.empty:
-            debt_schedule.to_excel(writer, sheet_name="13_Debt Schedule", index=False)
+            debt_schedule.to_excel(writer, sheet_name=get_text("sheet_debt_schedule", language), index=False)
 
         # Sheet 14: Technical Specs
         tech_specs = create_technical_specifications(capacity_mwh, power_mw)
-        tech_specs.to_excel(writer, sheet_name="14_Technical Specs", index=False, header=False)
+        tech_specs.to_excel(writer, sheet_name=get_text("sheet_technical", language), index=False, header=False)
 
         # Sheet 15: Development Timeline
         timeline = create_development_timeline()
-        timeline.to_excel(writer, sheet_name="15_Timeline", index=False, header=False)
+        timeline.to_excel(writer, sheet_name=get_text("sheet_timeline", language), index=False, header=False)
 
     output.seek(0)
     return output.getvalue()
@@ -1184,12 +1187,26 @@ def add_export_buttons(
     st.markdown("**Perfect for:** JP Morgan, Goldman Sachs, Citi, Morgan Stanley presentations | Senior debt syndications | Institutional equity investors")
     st.markdown("")
 
-    # Download button
+    # Language selection
+    col_lang1, col_lang2, col_lang3 = st.columns([1, 1, 1])
+    with col_lang2:
+        language = st.selectbox(
+            "🌍 Select Language / Selectați Limba",
+            options=["en", "ro"],
+            format_func=lambda x: "🇬🇧 English" if x == "en" else "🇷🇴 Română",
+            key="export_language"
+        )
+
+    st.markdown("")
+
+    # Download buttons
     col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 
     with col_btn2:
-        if st.button("📥 Generate Financial Model", type="primary", use_container_width=True):
-            with st.spinner("Generating comprehensive financial model... (15 sheets)"):
+        button_text = "📥 Generate Financial Model" if language == "en" else "📥 Generează Model Financiar"
+        if st.button(button_text, type="primary", use_container_width=True):
+            spinner_text = "Generating comprehensive financial model... (15 sheets)" if language == "en" else "Generare model financiar complet... (15 foi)"
+            with st.spinner(spinner_text):
                 try:
                     excel_data = export_financial_package_to_excel(
                         fr_metrics=fr_metrics,
@@ -1205,19 +1222,23 @@ def add_export_buttons(
                         pzu_opex_annual=pzu_opex_annual,
                         fr_years_analyzed=fr_years_analyzed,
                         pzu_years_analyzed=pzu_years_analyzed,
+                        language=language,
                     )
 
-                    filename = f"BESS_Financial_Model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    lang_suffix = "EN" if language == "en" else "RO"
+                    filename = f"BESS_Model_Financiar_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{lang_suffix}.xlsx"
 
+                    download_label = "⬇️ Download Financial Model (.xlsx)" if language == "en" else "⬇️ Descarcă Model Financiar (.xlsx)"
                     st.download_button(
-                        label="⬇️ Download Financial Model (.xlsx)",
+                        label=download_label,
                         data=excel_data,
                         file_name=filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.document",
                         use_container_width=True,
                     )
 
-                    st.success(f"✅ 15-sheet financial model generated successfully! ({capacity_mwh:.0f} MWh project)")
+                    success_msg = f"✅ 15-sheet financial model generated successfully! ({capacity_mwh:.0f} MWh project)" if language == "en" else f"✅ Model financiar cu 15 foi generat cu succes! (Proiect {capacity_mwh:.0f} MWh)"
+                    st.success(success_msg)
 
                 except Exception as e:
                     st.error(f"❌ Error generating financial model: {e}")
