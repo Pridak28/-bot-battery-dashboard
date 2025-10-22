@@ -66,35 +66,132 @@ def calculate_irr(cashflows: List[float], guess: float = 0.1) -> float:
 
 
 def apply_excel_formatting(ws, title: str):
-    """Apply professional Excel formatting to worksheet"""
-    # Title row formatting
-    ws['A1'].font = Font(bold=True, size=14, color="FFFFFF")
-    ws['A1'].fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
-    ws['A1'].alignment = Alignment(horizontal="left", vertical="center")
+    """Apply professional investment banking Excel formatting to worksheet"""
+    from openpyxl.styles import numbers
 
-    # Header row formatting (row 3)
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
+    # Define professional color scheme (JP Morgan style)
+    navy_blue = "1F4E78"
+    medium_blue = "4472C4"
+    light_blue = "D9E1F2"
+    light_gray = "F2F2F2"
+    dark_gray = "A6A6A6"
+    white = "FFFFFF"
 
-    for cell in ws[3]:
-        cell.fill = header_fill
-        cell.font = header_font
+    # Define borders
+    thin_border = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
+    )
+
+    # Title row formatting (Row 1)
+    ws.row_dimensions[1].height = 25
+    for col in range(1, ws.max_column + 1):
+        cell = ws.cell(row=1, column=col)
+        if col == 1:
+            cell.font = Font(bold=True, size=14, color=white, name='Calibri')
+            cell.fill = PatternFill(start_color=navy_blue, end_color=navy_blue, fill_type="solid")
+        else:
+            cell.fill = PatternFill(start_color=navy_blue, end_color=navy_blue, fill_type="solid")
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+        cell.border = thin_border
+
+    # Merge title across columns
+    if ws.max_column > 1:
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=min(ws.max_column, 6))
+
+    # Header row formatting (Row 3) - detect header row
+    header_row = 3
+    for row_idx in range(1, min(10, ws.max_row + 1)):
+        cell_val = str(ws.cell(row=row_idx, column=1).value or "").upper()
+        if any(keyword in cell_val for keyword in ["YEAR", "MONTH", "ITEM", "CATEGORY", "METRIC", "COMPONENT", "RISK"]):
+            header_row = row_idx
+            break
+
+    # Apply header formatting
+    ws.row_dimensions[header_row].height = 20
+    for col in range(1, ws.max_column + 1):
+        cell = ws.cell(row=header_row, column=col)
+        cell.fill = PatternFill(start_color=medium_blue, end_color=medium_blue, fill_type="solid")
+        cell.font = Font(bold=True, color=white, size=11, name='Calibri')
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
 
-    # Freeze panes at row 4
-    ws.freeze_panes = "A4"
+    # Freeze panes at data row
+    ws.freeze_panes = f"A{header_row + 1}"
 
-    # Auto-adjust column widths
-    for column in ws.columns:
+    # Format data rows
+    for row_idx in range(header_row + 1, ws.max_row + 1):
+        # Alternate row coloring for better readability
+        fill_color = white if row_idx % 2 == 0 else light_gray
+
+        for col_idx in range(1, ws.max_column + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.border = thin_border
+            cell.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
+
+            # Apply number formatting based on content
+            if cell.value is not None:
+                # Check if it's a number
+                if isinstance(cell.value, (int, float)):
+                    # Format as currency if it's a large number (likely EUR)
+                    if abs(cell.value) > 1000:
+                        cell.number_format = '#,##0'
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                    # Format as percentage if between 0-1
+                    elif 0 <= abs(cell.value) <= 1 and col_idx > 1:
+                        cell.number_format = '0.00%'
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                    # Format as decimal
+                    else:
+                        cell.number_format = '0.00'
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                # Check if string contains € or EUR
+                elif isinstance(cell.value, str):
+                    if '€' in cell.value or 'EUR' in cell.value:
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                    elif '%' in cell.value:
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                    else:
+                        cell.alignment = Alignment(horizontal="left", vertical="center")
+
+            # Bold first column (labels)
+            if col_idx == 1:
+                cell.font = Font(bold=True, size=10, name='Calibri')
+
+                # Detect total/subtotal rows and highlight
+                cell_val = str(cell.value or "").upper()
+                if any(word in cell_val for word in ["TOTAL", "SUBTOTAL", "NET", "EBITDA", "DSCR"]):
+                    cell.fill = PatternFill(start_color=light_blue, end_color=light_blue, fill_type="solid")
+                    cell.font = Font(bold=True, size=10, name='Calibri', color=navy_blue)
+                    # Apply to entire row
+                    for c in range(1, ws.max_column + 1):
+                        ws.cell(row=row_idx, column=c).fill = PatternFill(start_color=light_blue, end_color=light_blue, fill_type="solid")
+                        ws.cell(row=row_idx, column=c).font = Font(bold=True, size=10, name='Calibri', color=navy_blue)
+
+    # Auto-adjust column widths with better logic
+    for col_idx in range(1, ws.max_column + 1):
+        column_letter = ws.cell(row=1, column=col_idx).column_letter
         max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
+
+        for row_idx in range(1, min(ws.max_row + 1, 100)):  # Check first 100 rows
+            cell = ws.cell(row=row_idx, column=col_idx)
             try:
                 if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
+                    cell_length = len(str(cell.value))
+                    max_length = max(max_length, cell_length)
             except:
                 pass
-        adjusted_width = min(max_length + 2, 50)
+
+        # Set width with reasonable limits
+        if col_idx == 1:
+            # First column (labels) - wider
+            adjusted_width = min(max(max_length + 2, 25), 50)
+        else:
+            # Data columns
+            adjusted_width = min(max(max_length + 2, 12), 35)
+
         ws.column_dimensions[column_letter].width = adjusted_width
 
 
@@ -920,6 +1017,12 @@ def export_financial_package_to_excel(
         timeline = create_development_timeline()
         timeline.to_excel(writer, sheet_name=get_text("sheet_timeline", language), index=False, header=False)
 
+        # Apply professional formatting to all sheets
+        workbook = writer.book
+        for sheet_name in workbook.sheetnames:
+            worksheet = workbook[sheet_name]
+            apply_excel_formatting(worksheet, sheet_name)
+
     output.seek(0)
     return output.getvalue()
 
@@ -1030,91 +1133,6 @@ def add_export_buttons(
                 f"{payback} years" if payback else "N/A",
                 help="Equity payback period"
             )
-
-        st.markdown("")
-
-        # Investment structure table
-        st.markdown("#### 💰 Transaction Structure")
-
-        structure_data = {
-            "Component": [
-                "Total Investment",
-                "Senior Debt",
-                "Sponsor Equity",
-                "Debt/Total Cost",
-                "Interest Rate",
-                "Loan Term"
-            ],
-            "Amount / Rate": [
-                format_currency(investment_eur),
-                format_currency(debt_eur),
-                format_currency(equity_eur),
-                f"{(debt_eur/investment_eur)*100:.0f}%",
-                f"{interest_rate*100:.2f}%",
-                f"{loan_term_years} years"
-            ],
-            "Notes": [
-                f"{capacity_mwh:.0f} MWh BESS",
-                f"{(debt_eur/investment_eur)*100:.0f}% leverage",
-                f"{(equity_eur/investment_eur)*100:.0f}% equity",
-                "Target: 70/30",
-                "Fixed rate",
-                "Level amortization"
-            ]
-        }
-
-        st.dataframe(
-            pd.DataFrame(structure_data),
-            hide_index=True,
-            use_container_width=True
-        )
-
-        st.markdown("")
-
-        # Revenue model table
-        st.markdown("#### 💵 Base Case Revenue Model (Annual)")
-
-        revenue_data = {
-            "Line Item": [
-                "Gross Revenue",
-                "  - Capacity Payments",
-                "  - Activation Revenue",
-                "Energy Costs (COGS)",
-                "Gross Margin",
-                "Fixed OPEX",
-                "EBITDA",
-                "Debt Service",
-                "Free Cashflow"
-            ],
-            "Amount (€)": [
-                format_currency(fr_annual.get("total", 0)),
-                format_currency(fr_annual.get("capacity", 0)),
-                format_currency(fr_annual.get("activation", 0)),
-                format_currency(-fr_annual.get("energy_cost", 0)),
-                format_currency(fr_annual.get("total", 0) - fr_annual.get("energy_cost", 0)),
-                format_currency(-fr_opex_annual),
-                format_currency(fr_annual.get("total", 0) - fr_annual.get("energy_cost", 0) - fr_opex_annual),
-                format_currency(-fr_annual.get("debt", 0)),
-                format_currency(fr_annual.get("net", 0))
-            ],
-            "% of Revenue": [
-                "100%",
-                f"{(fr_annual.get('capacity', 0) / fr_annual.get('total', 1)) * 100:.1f}%",
-                f"{(fr_annual.get('activation', 0) / fr_annual.get('total', 1)) * 100:.1f}%",
-                f"{(-fr_annual.get('energy_cost', 0) / fr_annual.get('total', 1)) * 100:.1f}%",
-                f"{((fr_annual.get('total', 0) - fr_annual.get('energy_cost', 0)) / fr_annual.get('total', 1)) * 100:.1f}%",
-                f"{(-fr_opex_annual / fr_annual.get('total', 1)) * 100:.1f}%",
-                f"{((fr_annual.get('total', 0) - fr_annual.get('energy_cost', 0) - fr_opex_annual) / fr_annual.get('total', 1)) * 100:.1f}%",
-                f"{(-fr_annual.get('debt', 0) / fr_annual.get('total', 1)) * 100:.1f}%",
-                f"{(fr_annual.get('net', 0) / fr_annual.get('total', 1)) * 100:.1f}%"
-            ]
-        }
-
-        st.dataframe(
-            pd.DataFrame(revenue_data),
-            hide_index=True,
-            use_container_width=True
-        )
 
         st.markdown("")
 
