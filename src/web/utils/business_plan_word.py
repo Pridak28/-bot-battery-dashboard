@@ -273,14 +273,15 @@ def generate_comprehensive_business_plan(
         add_bullet_point(doc, f"Annual ROI: {(pzu_annual.get('net', 0) / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
     else:
         # Provide conservative estimates when PZU data not available
-        estimated_pzu_revenue = capacity_mwh * 250  # Conservative: €250/MWh/year arbitrage
+        # Conservative estimate: 1 cycle/day * 365 days * capacity * €15/MWh spread
+        estimated_pzu_revenue = capacity_mwh * 365 * 15  # €15/MWh spread, 1 cycle/day
         estimated_pzu_ebitda = estimated_pzu_revenue - pzu_opex_annual
-        estimated_pzu_debt = investment_eur * 0.70 * interest_rate  # Annual interest approximation
+        estimated_pzu_debt = investment_eur * 0.50 * interest_rate  # Annual interest with 50/50 structure
         estimated_pzu_net = estimated_pzu_ebitda - estimated_pzu_debt
 
-        add_bullet_point(doc, f"Annual Gross Profit: €{estimated_pzu_revenue:,.0f} (estimated based on market spreads)")
+        add_bullet_point(doc, f"Annual Gross Profit: €{estimated_pzu_revenue:,.0f} (estimated: €15/MWh spread, 1 cycle/day)")
         add_bullet_point(doc, f"Annual Operating Costs: €{pzu_opex_annual:,.0f}")
-        add_bullet_point(doc, f"Annual Debt Service: €{estimated_pzu_debt:,.0f}")
+        add_bullet_point(doc, f"Annual Debt Service: €{estimated_pzu_debt:,.0f} (interest only)")
         add_bullet_point(doc, f"Net Annual Profit: €{estimated_pzu_net:,.0f} (estimated)")
         add_bullet_point(doc, f"Annual ROI: {(estimated_pzu_net / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
 
