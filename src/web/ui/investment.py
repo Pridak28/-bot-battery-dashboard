@@ -915,23 +915,10 @@ def render_investment_financing_analysis(cfg: dict) -> None:
             else:
                 st.info("Run PZU Horizons to see data")
 
-    # Add export functionality for banking/finance reports
-    add_export_buttons(
-        fr_metrics=fr_metrics,
-        pzu_metrics=pzu_metrics,
-        investment_eur=total_investment,
-        equity_eur=fr_equity,  # Same for both (comparison mode)
-        debt_eur=fr_debt,  # Same for both (comparison mode)
-        loan_term_years=loan_term_years,
-        interest_rate=interest_rate,
-        fr_opex_annual=fr_operating_cost_annual,
-        pzu_opex_annual=pzu_operating_cost_annual,
-        fr_years_analyzed=fr_years_count,
-        pzu_years_analyzed=pzu_years_count,
-    )
-
-    # Add professional business overview report (for single project)
-    # NOTE: This is configured for ONE 15 MWh project (not 3 projects)
+    # =========================================================================
+    # SCALE ALL EXPORTS FOR SINGLE PROJECT (15 MWh)
+    # NOTE: All exports are configured for ONE project out of 3 total projects
+    # =========================================================================
     battery_cfg = cfg.get("battery", {})
     single_project_capacity = float(battery_cfg.get("capacity_mwh", 55.0)) / 3.0  # Divide by 3 for single project
     single_project_power = float(battery_cfg.get("power_mw", 25.0)) / 3.0  # Divide by 3 for single project
@@ -950,7 +937,18 @@ def render_investment_financing_analysis(cfg: dict) -> None:
                 "energy_cost": fr_metrics.get("annual", {}).get("energy_cost", 0) / 3.0,
                 "debt": fr_metrics.get("annual", {}).get("debt", 0) / 3.0,
                 "net": fr_metrics.get("annual", {}).get("net", 0) / 3.0,
-            }
+            },
+            "months": [
+                {
+                    "month": m.get("month"),
+                    "capacity_revenue_eur": m.get("capacity_revenue_eur", 0) / 3.0,
+                    "activation_revenue_eur": m.get("activation_revenue_eur", 0) / 3.0,
+                    "total_revenue_eur": m.get("total_revenue_eur", 0) / 3.0,
+                    "energy_cost_eur": m.get("energy_cost_eur", 0) / 3.0,
+                    "activation_energy_mwh": m.get("activation_energy_mwh", 0) / 3.0,
+                }
+                for m in fr_metrics.get("months", [])
+            ] if "months" in fr_metrics else []
         }
 
     single_pzu_metrics = None
@@ -960,8 +958,32 @@ def render_investment_financing_analysis(cfg: dict) -> None:
                 "total": pzu_metrics.get("annual", {}).get("total", 0) / 3.0,
                 "debt": pzu_metrics.get("annual", {}).get("debt", 0) / 3.0,
                 "net": pzu_metrics.get("annual", {}).get("net", 0) / 3.0,
-            }
+            },
+            "daily_history": [
+                {
+                    "date": d.get("date"),
+                    "daily_profit_eur": d.get("daily_profit_eur", 0) / 3.0,
+                    "daily_revenue_eur": d.get("daily_revenue_eur", 0) / 3.0,
+                    "daily_cost_eur": d.get("daily_cost_eur", 0) / 3.0,
+                }
+                for d in pzu_metrics.get("daily_history", [])
+            ] if "daily_history" in pzu_metrics else []
         }
+
+    # Add export functionality for banking/finance reports (SINGLE PROJECT)
+    add_export_buttons(
+        fr_metrics=single_fr_metrics,
+        pzu_metrics=single_pzu_metrics,
+        investment_eur=single_project_investment,
+        equity_eur=single_project_equity,
+        debt_eur=single_project_debt,
+        loan_term_years=loan_term_years,
+        interest_rate=interest_rate,
+        fr_opex_annual=fr_operating_cost_annual / 3.0,
+        pzu_opex_annual=pzu_operating_cost_annual / 3.0,
+        fr_years_analyzed=fr_years_count,
+        pzu_years_analyzed=pzu_years_count,
+    )
 
     add_business_report_button(
         project_name="Battery Energy Storage Project #1",
