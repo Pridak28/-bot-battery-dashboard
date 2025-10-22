@@ -924,6 +924,8 @@ def export_financial_package_to_excel(
 def add_export_buttons(
     fr_metrics: Optional[Dict[str, Any]],
     pzu_metrics: Optional[Dict[str, Any]],
+    capacity_mwh: float,
+    power_mw: float,
     investment_eur: float,
     equity_eur: float,
     debt_eur: float,
@@ -937,13 +939,6 @@ def add_export_buttons(
     """
     Add JP Morgan-level export button to Streamlit UI
     """
-
-    # Get capacity from session state or config
-    from src.config import load_config
-    config = load_config()
-    battery_cfg = config.get("battery", {})
-    capacity_mwh = 15.0  # Single project capacity
-    power_mw = float(battery_cfg.get("power_mw", 20.0))
 
     st.markdown("---")
     st.markdown("### 📊 Export Investment Banking Package")

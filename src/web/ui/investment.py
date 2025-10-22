@@ -981,6 +981,8 @@ def render_investment_financing_analysis(cfg: dict) -> None:
     add_export_buttons(
         fr_metrics=single_fr_metrics,
         pzu_metrics=single_pzu_metrics,
+        capacity_mwh=single_project_capacity,
+        power_mw=single_project_power,
         investment_eur=single_project_investment,
         equity_eur=single_project_equity,
         debt_eur=single_project_debt,
