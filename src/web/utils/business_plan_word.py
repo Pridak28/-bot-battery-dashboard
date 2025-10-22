@@ -1889,8 +1889,23 @@ def add_word_business_plan_button(
         **Perfect for:** Bank presentations, investor pitch decks, board approvals
         """)
 
+    #Language selection
+    st.markdown("")
+    col_lang1, col_lang2, col_lang3 = st.columns([1, 1, 1])
+    with col_lang2:
+        language_bp = st.selectbox(
+            "🌍 Select Language / Selectați Limba",
+            options=["en"],
+            format_func=lambda x: "🇬🇧 English (Romanian translation coming soon)",
+            key="business_plan_language",
+            help="Romanian translation in development"
+        )
+
+    st.markdown("")
+
     with col2:
-        if st.button("📥 Generate Business Plan", type="primary", use_container_width=True):
+        button_text = "📥 Generate Business Plan (English)"
+        if st.button(button_text, type="primary", use_container_width=True):
             with st.spinner("Generating comprehensive business plan... This may take 10-15 seconds"):
                 try:
                     word_doc = generate_comprehensive_business_plan(
