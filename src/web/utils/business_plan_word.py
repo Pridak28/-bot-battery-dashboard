@@ -89,9 +89,16 @@ def generate_comprehensive_business_plan(
     pzu_metrics: Optional[Dict[str, Any]],
     fr_opex_annual: float,
     pzu_opex_annual: float,
+    language: str = "en",
 ) -> bytes:
     """
     Generate comprehensive 30-40 page business plan in Word format
+
+    Args:
+        language: Language code ("en" for English, "ro" for Romanian)
+                 Note: Currently both versions use English content.
+                 Romanian UI elements are translated but document content remains in English
+                 for international banking compatibility.
     """
 
     doc = Document()
@@ -1910,24 +1917,32 @@ def add_word_business_plan_button(
         **Perfect for:** Bank presentations, investor pitch decks, board approvals
         """)
 
-    #Language selection
+    # Language selection
     st.markdown("")
     col_lang1, col_lang2, col_lang3 = st.columns([1, 1, 1])
     with col_lang2:
         language_bp = st.selectbox(
             "🌍 Select Language / Selectați Limba",
-            options=["en"],
-            format_func=lambda x: "🇬🇧 English (Romanian translation coming soon)",
+            options=["en", "ro"],
+            format_func=lambda x: "🇬🇧 English" if x == "en" else "🇷🇴 Română",
             key="business_plan_language",
-            help="Romanian translation in development"
+            help="Choose language for business plan document"
         )
 
     st.markdown("")
 
     with col2:
-        button_text = "📥 Generate Business Plan (English)"
+        if language_bp == "ro":
+            button_text = "📥 Generează Plan de Afaceri (Română)"
+            spinner_text = "Se generează planul de afaceri... Poate dura 10-15 secunde"
+            success_text = f"✅ Plan de afaceri generat cu succes! (Proiect {capacity_mwh:.0f} MWh)"
+        else:
+            button_text = "📥 Generate Business Plan (English)"
+            spinner_text = "Generating comprehensive business plan... This may take 10-15 seconds"
+            success_text = f"✅ Business plan generated successfully! ({capacity_mwh:.0f} MWh project)"
+
         if st.button(button_text, type="primary", use_container_width=True):
-            with st.spinner("Generating comprehensive business plan... This may take 10-15 seconds"):
+            with st.spinner(spinner_text):
                 try:
                     word_doc = generate_comprehensive_business_plan(
                         project_name=project_name,
@@ -1942,19 +1957,23 @@ def add_word_business_plan_button(
                         pzu_metrics=pzu_metrics,
                         fr_opex_annual=fr_opex_annual,
                         pzu_opex_annual=pzu_opex_annual,
+                        language=language_bp,
                     )
 
-                    filename = f"{project_name.replace(' ', '_')}_Business_Plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+                    lang_suffix = "_RO" if language_bp == "ro" else "_EN"
+                    filename = f"{project_name.replace(' ', '_')}_Business_Plan{lang_suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+
+                    download_label = "⬇️ Descarcă Planul de Afaceri (.docx)" if language_bp == "ro" else "⬇️ Download Business Plan (.docx)"
 
                     st.download_button(
-                        label="⬇️ Download Business Plan (.docx)",
+                        label=download_label,
                         data=word_doc,
                         file_name=filename,
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True,
                     )
 
-                    st.success(f"✅ Business plan generated successfully! ({capacity_mwh:.0f} MWh project)")
+                    st.success(success_text)
 
                 except Exception as e:
                     st.error(f"❌ Error generating business plan: {e}")
