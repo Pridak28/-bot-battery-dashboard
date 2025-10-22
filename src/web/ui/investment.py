@@ -9,6 +9,7 @@ import streamlit as st
 from src.web.data import backfill_fr_monthly_dataframe
 from src.web.utils.formatting import format_currency
 from src.web.utils.styles import section_header, kpi_card, kpi_grid
+from src.web.utils.export import add_export_buttons
 
 
 def render_investment_financing_analysis(cfg: dict) -> None:
@@ -911,3 +912,18 @@ def render_investment_financing_analysis(cfg: dict) -> None:
                         st.caption(f"• {year}: {profit_str} ({indicator})")
             else:
                 st.info("Run PZU Horizons to see data")
+
+    # Add export functionality for banking/finance reports
+    add_export_buttons(
+        fr_metrics=fr_metrics,
+        pzu_metrics=pzu_metrics,
+        investment_eur=total_investment,
+        equity_eur=fr_equity,  # Same for both (comparison mode)
+        debt_eur=fr_debt,  # Same for both (comparison mode)
+        loan_term_years=loan_term_years,
+        interest_rate=interest_rate,
+        fr_opex_annual=fr_operating_cost_annual,
+        pzu_opex_annual=pzu_operating_cost_annual,
+        fr_years_analyzed=fr_years_count,
+        pzu_years_analyzed=pzu_years_count,
+    )
