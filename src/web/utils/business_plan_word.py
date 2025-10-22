@@ -215,18 +215,34 @@ def generate_comprehensive_business_plan(
     # FR Strategy - always show with data or estimates
     add_formatted_paragraph(doc, 'Frequency Regulation Strategy (Primary Business Case):', bold=True)
 
+    # Calculate actual annual debt service based on passed parameters
+    def _annuity_payment(principal: float, rate: float, periods: int) -> float:
+        if principal <= 0 or periods <= 0:
+            return 0.0
+        if rate <= 0:
+            return principal / periods
+        factor = (1 + rate) ** periods
+        return principal * rate * factor / (factor - 1)
+
+    actual_fr_debt_service = _annuity_payment(debt_eur, interest_rate, loan_term_years)
+
     if fr_metrics and 'annual' in fr_metrics:
         fr_annual = fr_metrics['annual']
-        add_bullet_point(doc, f"Annual Revenue: €{fr_annual.get('total', 0):,.0f}")
+        fr_revenue = fr_annual.get('total', 0)
+        fr_energy_cost = fr_annual.get('energy_cost', 0)
+        fr_ebitda = fr_revenue - fr_energy_cost - fr_opex_annual
+        fr_net_profit = fr_ebitda - actual_fr_debt_service
+
+        add_bullet_point(doc, f"Annual Revenue: €{fr_revenue:,.0f}")
         add_bullet_point(doc, f"  - Capacity Payments: €{fr_annual.get('capacity', 0):,.0f}")
         add_bullet_point(doc, f"  - Activation Revenue: €{fr_annual.get('activation', 0):,.0f}")
         add_bullet_point(doc, f"Annual Operating Costs: €{fr_opex_annual:,.0f}")
-        add_bullet_point(doc, f"Annual Energy Costs: €{fr_annual.get('energy_cost', 0):,.0f}")
-        add_bullet_point(doc, f"Annual Debt Service: €{fr_annual.get('debt', 0):,.0f}")
-        add_bullet_point(doc, f"Net Annual Profit: €{fr_annual.get('net', 0):,.0f}")
-        add_bullet_point(doc, f"Annual ROI: {(fr_annual.get('net', 0) / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
+        add_bullet_point(doc, f"Annual Energy Costs: €{fr_energy_cost:,.0f}")
+        add_bullet_point(doc, f"Annual Debt Service: €{actual_fr_debt_service:,.0f} ({loan_term_years}-year annuity @ {interest_rate*100:.1f}%)")
+        add_bullet_point(doc, f"Net Annual Profit: €{fr_net_profit:,.0f}")
+        add_bullet_point(doc, f"Annual ROI: {(fr_net_profit / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
 
-        payback = investment_eur / fr_annual.get('net', 1) if fr_annual.get('net', 0) > 0 else float('inf')
+        payback = investment_eur / fr_net_profit if fr_net_profit > 0 else float('inf')
         add_bullet_point(doc, f"Simple Payback Period: {payback:.1f} years")
     else:
         # Provide conservative estimates when FR data not available
@@ -236,15 +252,14 @@ def generate_comprehensive_business_plan(
         estimated_fr_revenue = estimated_capacity_revenue + estimated_activation_revenue
         estimated_energy_cost = estimated_activation_revenue * 0.15  # ~15% of activation revenue
         estimated_fr_ebitda = estimated_fr_revenue - estimated_energy_cost - fr_opex_annual
-        estimated_fr_debt = investment_eur * 0.70 * interest_rate  # Annual interest approximation
-        estimated_fr_net = estimated_fr_ebitda - estimated_fr_debt
+        estimated_fr_net = estimated_fr_ebitda - actual_fr_debt_service
 
         add_bullet_point(doc, f"Annual Revenue: €{estimated_fr_revenue:,.0f} (estimated)")
         add_bullet_point(doc, f"  - Capacity Payments: €{estimated_capacity_revenue:,.0f} (est. €7/MW/h)")
         add_bullet_point(doc, f"  - Activation Revenue: €{estimated_activation_revenue:,.0f} (est. 12% duty cycle)")
         add_bullet_point(doc, f"Annual Operating Costs: €{fr_opex_annual:,.0f}")
         add_bullet_point(doc, f"Annual Energy Costs: €{estimated_energy_cost:,.0f} (estimated)")
-        add_bullet_point(doc, f"Annual Debt Service: €{estimated_fr_debt:,.0f}")
+        add_bullet_point(doc, f"Annual Debt Service: €{actual_fr_debt_service:,.0f} ({loan_term_years}-year annuity @ {interest_rate*100:.1f}%)")
         add_bullet_point(doc, f"Net Annual Profit: €{estimated_fr_net:,.0f} (estimated)")
         add_bullet_point(doc, f"Annual ROI: {(estimated_fr_net / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
 
@@ -264,24 +279,29 @@ def generate_comprehensive_business_plan(
     # PZU Arbitrage Strategy - always show with data or estimates
     add_formatted_paragraph(doc, 'Energy Arbitrage Strategy (Alternative Business Case):', bold=True)
 
+    actual_pzu_debt_service = _annuity_payment(debt_eur, interest_rate, loan_term_years)
+
     if pzu_metrics and 'annual' in pzu_metrics:
         pzu_annual = pzu_metrics['annual']
-        add_bullet_point(doc, f"Annual Gross Profit: €{pzu_annual.get('total', 0):,.0f}")
+        pzu_revenue = pzu_annual.get('total', 0)
+        pzu_ebitda = pzu_revenue - pzu_opex_annual
+        pzu_net_profit = pzu_ebitda - actual_pzu_debt_service
+
+        add_bullet_point(doc, f"Annual Gross Profit: €{pzu_revenue:,.0f}")
         add_bullet_point(doc, f"Annual Operating Costs: €{pzu_opex_annual:,.0f}")
-        add_bullet_point(doc, f"Annual Debt Service: €{pzu_annual.get('debt', 0):,.0f}")
-        add_bullet_point(doc, f"Net Annual Profit: €{pzu_annual.get('net', 0):,.0f}")
-        add_bullet_point(doc, f"Annual ROI: {(pzu_annual.get('net', 0) / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
+        add_bullet_point(doc, f"Annual Debt Service: €{actual_pzu_debt_service:,.0f} ({loan_term_years}-year annuity @ {interest_rate*100:.1f}%)")
+        add_bullet_point(doc, f"Net Annual Profit: €{pzu_net_profit:,.0f}")
+        add_bullet_point(doc, f"Annual ROI: {(pzu_net_profit / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
     else:
         # Provide conservative estimates when PZU data not available
         # Conservative estimate: 1 cycle/day * 365 days * capacity * €15/MWh spread
         estimated_pzu_revenue = capacity_mwh * 365 * 15  # €15/MWh spread, 1 cycle/day
         estimated_pzu_ebitda = estimated_pzu_revenue - pzu_opex_annual
-        estimated_pzu_debt = investment_eur * 0.50 * interest_rate  # Annual interest with 50/50 structure
-        estimated_pzu_net = estimated_pzu_ebitda - estimated_pzu_debt
+        estimated_pzu_net = estimated_pzu_ebitda - actual_pzu_debt_service
 
         add_bullet_point(doc, f"Annual Gross Profit: €{estimated_pzu_revenue:,.0f} (estimated: €15/MWh spread, 1 cycle/day)")
         add_bullet_point(doc, f"Annual Operating Costs: €{pzu_opex_annual:,.0f}")
-        add_bullet_point(doc, f"Annual Debt Service: €{estimated_pzu_debt:,.0f} (interest only)")
+        add_bullet_point(doc, f"Annual Debt Service: €{actual_pzu_debt_service:,.0f} ({loan_term_years}-year annuity @ {interest_rate*100:.1f}%)")
         add_bullet_point(doc, f"Net Annual Profit: €{estimated_pzu_net:,.0f} (estimated)")
         add_bullet_point(doc, f"Annual ROI: {(estimated_pzu_net / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
 
