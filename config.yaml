@@ -1,11 +1,11 @@
 battery:
   capacity_mwh: 55.0
-  power_mw: 20.0
+  power_mw: 15.0
   soc_initial: 0.5 # 0..1
   round_trip_efficiency: 0.9
 risk:
   max_position_mwh: 55.0
-  max_order_mwh: 20.0
+  max_order_mwh: 15.0
   min_price_eur_mwh: -100.0
   max_price_eur_mwh: 500.0
   credit_check_enabled: false
