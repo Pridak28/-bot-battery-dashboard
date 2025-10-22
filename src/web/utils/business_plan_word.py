@@ -212,9 +212,11 @@ def generate_comprehensive_business_plan(
 
     add_heading_styled(doc, '1.3 Financial Summary', level=2)
 
+    # FR Strategy - always show with data or estimates
+    add_formatted_paragraph(doc, 'Frequency Regulation Strategy (Primary Business Case):', bold=True)
+
     if fr_metrics and 'annual' in fr_metrics:
         fr_annual = fr_metrics['annual']
-        add_formatted_paragraph(doc, 'Frequency Regulation Strategy (Primary Business Case):', bold=True)
         add_bullet_point(doc, f"Annual Revenue: €{fr_annual.get('total', 0):,.0f}")
         add_bullet_point(doc, f"  - Capacity Payments: €{fr_annual.get('capacity', 0):,.0f}")
         add_bullet_point(doc, f"  - Activation Revenue: €{fr_annual.get('activation', 0):,.0f}")
@@ -226,17 +228,69 @@ def generate_comprehensive_business_plan(
 
         payback = investment_eur / fr_annual.get('net', 1) if fr_annual.get('net', 0) > 0 else float('inf')
         add_bullet_point(doc, f"Simple Payback Period: {payback:.1f} years")
+    else:
+        # Provide conservative estimates when FR data not available
+        # Conservative assumption: €7/MW/h capacity + 12% activation duty cycle
+        estimated_capacity_revenue = power_mw * 7 * 8760  # €7/MW/h * 8760 hours/year
+        estimated_activation_revenue = capacity_mwh * 0.12 * 100 * 365  # 12% duty cycle, €100/MWh
+        estimated_fr_revenue = estimated_capacity_revenue + estimated_activation_revenue
+        estimated_energy_cost = estimated_activation_revenue * 0.15  # ~15% of activation revenue
+        estimated_fr_ebitda = estimated_fr_revenue - estimated_energy_cost - fr_opex_annual
+        estimated_fr_debt = investment_eur * 0.70 * interest_rate  # Annual interest approximation
+        estimated_fr_net = estimated_fr_ebitda - estimated_fr_debt
+
+        add_bullet_point(doc, f"Annual Revenue: €{estimated_fr_revenue:,.0f} (estimated)")
+        add_bullet_point(doc, f"  - Capacity Payments: €{estimated_capacity_revenue:,.0f} (est. €7/MW/h)")
+        add_bullet_point(doc, f"  - Activation Revenue: €{estimated_activation_revenue:,.0f} (est. 12% duty cycle)")
+        add_bullet_point(doc, f"Annual Operating Costs: €{fr_opex_annual:,.0f}")
+        add_bullet_point(doc, f"Annual Energy Costs: €{estimated_energy_cost:,.0f} (estimated)")
+        add_bullet_point(doc, f"Annual Debt Service: €{estimated_fr_debt:,.0f}")
+        add_bullet_point(doc, f"Net Annual Profit: €{estimated_fr_net:,.0f} (estimated)")
+        add_bullet_point(doc, f"Annual ROI: {(estimated_fr_net / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
+
+        payback = investment_eur / estimated_fr_net if estimated_fr_net > 0 else float('inf')
+        add_bullet_point(doc, f"Simple Payback Period: {payback:.1f} years")
+
+        add_formatted_paragraph(doc, '')
+        add_formatted_paragraph(doc,
+            'Note: FR figures are conservative estimates based on historical Romanian aFRR market pricing (€6-8/MW/h) '
+            'and typical activation duty cycles. Actual performance will vary based on market conditions and TSO dispatch. '
+            'Run FR Simulator for detailed historical analysis.',
+            italic=True
+        )
 
     add_formatted_paragraph(doc, '')
 
+    # PZU Arbitrage Strategy - always show with data or estimates
+    add_formatted_paragraph(doc, 'Energy Arbitrage Strategy (Alternative Business Case):', bold=True)
+
     if pzu_metrics and 'annual' in pzu_metrics:
         pzu_annual = pzu_metrics['annual']
-        add_formatted_paragraph(doc, 'Energy Arbitrage Strategy (Alternative Business Case):', bold=True)
         add_bullet_point(doc, f"Annual Gross Profit: €{pzu_annual.get('total', 0):,.0f}")
         add_bullet_point(doc, f"Annual Operating Costs: €{pzu_opex_annual:,.0f}")
         add_bullet_point(doc, f"Annual Debt Service: €{pzu_annual.get('debt', 0):,.0f}")
         add_bullet_point(doc, f"Net Annual Profit: €{pzu_annual.get('net', 0):,.0f}")
         add_bullet_point(doc, f"Annual ROI: {(pzu_annual.get('net', 0) / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
+    else:
+        # Provide conservative estimates when PZU data not available
+        estimated_pzu_revenue = capacity_mwh * 250  # Conservative: €250/MWh/year arbitrage
+        estimated_pzu_ebitda = estimated_pzu_revenue - pzu_opex_annual
+        estimated_pzu_debt = investment_eur * 0.70 * interest_rate  # Annual interest approximation
+        estimated_pzu_net = estimated_pzu_ebitda - estimated_pzu_debt
+
+        add_bullet_point(doc, f"Annual Gross Profit: €{estimated_pzu_revenue:,.0f} (estimated based on market spreads)")
+        add_bullet_point(doc, f"Annual Operating Costs: €{pzu_opex_annual:,.0f}")
+        add_bullet_point(doc, f"Annual Debt Service: €{estimated_pzu_debt:,.0f}")
+        add_bullet_point(doc, f"Net Annual Profit: €{estimated_pzu_net:,.0f} (estimated)")
+        add_bullet_point(doc, f"Annual ROI: {(estimated_pzu_net / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
+
+        add_formatted_paragraph(doc, '')
+        add_formatted_paragraph(doc,
+            'Note: PZU figures are conservative estimates based on historical Romanian day-ahead market spreads. '
+            'Actual performance will be determined by real-time market conditions and trading strategy execution. '
+            'Run PZU Horizons simulator for detailed historical analysis.',
+            italic=True
+        )
 
     add_heading_styled(doc, '1.4 Strategic Rationale', level=2)
     add_formatted_paragraph(doc,
