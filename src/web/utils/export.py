@@ -68,6 +68,7 @@ def calculate_irr(cashflows: List[float], guess: float = 0.1) -> float:
 def apply_excel_formatting(ws, title: str):
     """Apply professional investment banking Excel formatting to worksheet"""
     from openpyxl.styles import numbers
+    from openpyxl.utils import get_column_letter
 
     # Define professional color scheme (JP Morgan style)
     navy_blue = "1F4E78"
@@ -172,7 +173,7 @@ def apply_excel_formatting(ws, title: str):
 
     # Auto-adjust column widths with better logic
     for col_idx in range(1, ws.max_column + 1):
-        column_letter = ws.cell(row=1, column=col_idx).column_letter
+        column_letter = get_column_letter(col_idx)
         max_length = 0
 
         for row_idx in range(1, min(ws.max_row + 1, 100)):  # Check first 100 rows
