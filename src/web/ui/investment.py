@@ -11,6 +11,7 @@ from src.web.utils.formatting import format_currency
 from src.web.utils.styles import section_header, kpi_card, kpi_grid
 from src.web.utils.export import add_export_buttons
 from src.web.utils.business_report import add_business_report_button
+from src.web.utils.business_plan_word import add_word_business_plan_button
 
 
 def render_investment_financing_analysis(cfg: dict) -> None:
@@ -963,6 +964,22 @@ def render_investment_financing_analysis(cfg: dict) -> None:
         }
 
     add_business_report_button(
+        project_name="Battery Energy Storage Project #1",
+        capacity_mwh=single_project_capacity,
+        power_mw=single_project_power,
+        investment_eur=single_project_investment,
+        equity_eur=single_project_equity,
+        debt_eur=single_project_debt,
+        loan_term_years=loan_term_years,
+        interest_rate=interest_rate,
+        fr_metrics=single_fr_metrics,
+        pzu_metrics=single_pzu_metrics,
+        fr_opex_annual=fr_operating_cost_annual / 3.0,
+        pzu_opex_annual=pzu_operating_cost_annual / 3.0,
+    )
+
+    # Add comprehensive Word business plan (30-40 pages)
+    add_word_business_plan_button(
         project_name="Battery Energy Storage Project #1",
         capacity_mwh=single_project_capacity,
         power_mw=single_project_power,
