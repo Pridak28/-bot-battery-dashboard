@@ -63,3 +63,11 @@ fr_products:
     up_threshold_eur_mwh: 0.0
     down_threshold_eur_mwh: 0.0
     calendar_csv: ""
+investment:
+  capex_per_mw: 250000.0
+  additional_costs: 0.0
+  equity_percent: 50.0  # 50/50 debt-to-equity ratio
+  loan_interest_percent: 6.0
+  loan_term_years: 3  # Short-term 3-year loan
+  fr_operating_cost_annual: 150000.0
+  pzu_operating_cost_annual: 100000.0

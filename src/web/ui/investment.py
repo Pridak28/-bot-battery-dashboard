@@ -42,11 +42,11 @@ def render_investment_financing_analysis(cfg: dict) -> None:
     default_power = float(battery_cfg.get("power_mw", 20.0))
     default_capex_per_mw = float(investment_cfg.get("capex_per_mw", 250_000.0))
     default_additional_costs = float(investment_cfg.get("additional_costs", 0.0))
-    default_equity_pct = float(investment_cfg.get("equity_percent", 30.0))
+    default_equity_pct = float(investment_cfg.get("equity_percent", 50.0))  # 50/50 debt-to-equity
     default_interest = float(investment_cfg.get("loan_interest_percent", 6.0))
-    default_term = int(investment_cfg.get("loan_term_years", 7))
-    default_fr_opex = float(investment_cfg.get("fr_operating_cost_annual", 0.0))
-    default_pzu_opex = float(investment_cfg.get("pzu_operating_cost_annual", 0.0))
+    default_term = int(investment_cfg.get("loan_term_years", 3))  # 3-year loan
+    default_fr_opex = float(investment_cfg.get("fr_operating_cost_annual", 150_000.0))
+    default_pzu_opex = float(investment_cfg.get("pzu_operating_cost_annual", 100_000.0))
 
     col_inputs = st.columns(3)
     with col_inputs[0]:
