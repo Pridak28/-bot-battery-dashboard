@@ -43,15 +43,15 @@ strategy:
     max_deviation_fraction: 1.0
 fr_products:
   FCR:
-    enabled: true
-    contracted_mw: 10.0
+    enabled: false
+    contracted_mw: 0.0
     capacity_eur_per_mw_h: 7.5
     up_threshold_eur_mwh: 0.0
     down_threshold_eur_mwh: 0.0
     calendar_csv: ""
   aFRR:
     enabled: true
-    contracted_mw: 10.0
+    contracted_mw: 15.0
     capacity_eur_per_mw_h: 5.0
     up_threshold_eur_mwh: 0.0
     down_threshold_eur_mwh: 0.0
