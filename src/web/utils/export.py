@@ -316,12 +316,24 @@ def create_15year_cashflow(
     annual_revenue: float,
     annual_energy_cost: float,
     annual_opex: float,
-    annual_debt_service: float,
+    debt_eur: float,
+    interest_rate: float,
     investment_eur: float,
     equity_eur: float,
     loan_term_years: int,
 ) -> pd.DataFrame:
     """Sheet 3: Detailed 15-Year Cashflow Waterfall with escalations"""
+
+    # CRITICAL: Calculate annual debt service from actual parameters, not cached values
+    def _annuity_payment(principal: float, rate: float, periods: int) -> float:
+        if principal <= 0 or periods <= 0:
+            return 0.0
+        if rate <= 0:
+            return principal / periods
+        factor = (1 + rate) ** periods
+        return principal * rate * factor / (factor - 1)
+
+    annual_debt_service = _annuity_payment(debt_eur, interest_rate, loan_term_years)
 
     rows = []
     cumulative_equity = -equity_eur
@@ -361,10 +373,16 @@ def create_15year_cashflow(
             # Debt service
             if year <= loan_term_years:
                 debt_svc = annual_debt_service
-                # Approximate interest/principal split
-                remaining_term = loan_term_years - year + 1
-                interest_portion = debt_svc * 0.6 * (remaining_term / loan_term_years)
-                principal_portion = debt_svc - interest_portion
+                # Calculate exact interest/principal split using amortization math
+                # Remaining balance after (year-1) payments
+                remaining_balance = debt_eur
+                for y in range(1, year):
+                    interest_pay = remaining_balance * interest_rate
+                    principal_pay = annual_debt_service - interest_pay
+                    remaining_balance -= principal_pay
+
+                interest_portion = remaining_balance * interest_rate
+                principal_portion = annual_debt_service - interest_portion
             else:
                 debt_svc = 0
                 interest_portion = 0
@@ -511,10 +529,23 @@ def create_sensitivity_analysis(
     base_revenue: float,
     base_opex: float,
     base_energy_cost: float,
-    debt_service: float,
+    debt_eur: float,
+    interest_rate: float,
+    loan_term_years: int,
     equity: float,
 ) -> pd.DataFrame:
     """Sheet 6: Sensitivity & Scenario Analysis"""
+
+    # Calculate correct debt service
+    def _annuity_payment(principal: float, rate: float, periods: int) -> float:
+        if principal <= 0 or periods <= 0:
+            return 0.0
+        if rate <= 0:
+            return principal / periods
+        factor = (1 + rate) ** periods
+        return principal * rate * factor / (factor - 1)
+
+    debt_service = _annuity_payment(debt_eur, interest_rate, loan_term_years)
 
     data = [
         ["SENSITIVITY & SCENARIO ANALYSIS", ""],
@@ -956,7 +987,8 @@ def export_financial_package_to_excel(
                 annual_revenue=fr_annual.get("total", 0),
                 annual_energy_cost=fr_annual.get("energy_cost", 0),
                 annual_opex=fr_opex_annual,
-                annual_debt_service=fr_annual.get("debt", 0),
+                debt_eur=debt_eur,
+                interest_rate=interest_rate,
                 investment_eur=investment_eur,
                 equity_eur=equity_eur,
                 loan_term_years=loan_term_years,
@@ -976,7 +1008,9 @@ def export_financial_package_to_excel(
                 fr_annual.get("total", 0),
                 fr_opex_annual,
                 fr_annual.get("energy_cost", 0),
-                fr_annual.get("debt", 0),
+                debt_eur,
+                interest_rate,
+                loan_term_years,
                 equity_eur,
             )
             sensitivity.to_excel(writer, sheet_name=get_text("sheet_sensitivity", language), index=False, header=False)
@@ -1055,6 +1089,17 @@ def add_export_buttons(
     if fr_metrics and "annual" in fr_metrics:
         fr_annual = fr_metrics["annual"]
 
+        # Calculate annual debt service from actual parameters
+        def _annuity_payment(principal: float, rate: float, periods: int) -> float:
+            if principal <= 0 or periods <= 0:
+                return 0.0
+            if rate <= 0:
+                return principal / periods
+            factor = (1 + rate) ** periods
+            return principal * rate * factor / (factor - 1)
+
+        annual_debt_service = _annuity_payment(debt_eur, interest_rate, loan_term_years)
+
         # Calculate equity cashflows for IRR
         cashflows = []
         cumulative = -equity_eur
@@ -1067,7 +1112,7 @@ def add_export_buttons(
             ebitda = revenue - energy_cost - opex
 
             capex = -investment_eur * 0.10 if year == 6 else 0
-            debt_svc = fr_annual.get("debt", 0) if year <= loan_term_years else 0
+            debt_svc = annual_debt_service if year <= loan_term_years else 0
 
             fcf = ebitda + capex - debt_svc
             cumulative += fcf
@@ -1084,7 +1129,7 @@ def add_export_buttons(
             energy_cost = fr_annual.get("energy_cost", 0) * (1.02 ** (year - 1))
             opex = fr_opex_annual * (1.025 ** (year - 1))
             ebitda = revenue - energy_cost - opex
-            debt_svc = fr_annual.get("debt", 0)
+            debt_svc = annual_debt_service
 
             if debt_svc > 0:
                 dscr = ebitda / debt_svc
