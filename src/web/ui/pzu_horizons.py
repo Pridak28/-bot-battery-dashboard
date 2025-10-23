@@ -155,8 +155,23 @@ def render_pzu_horizons(
         if not daily_history.empty:
             # Convert DataFrame to serializable format
             daily_history_dict = daily_history.to_dict('records')
+
+            # Calculate annual totals from daily data for business plan/export
+            stats = result.get("stats", {})
+            total_profit = stats.get("total_profit_eur", 0)
+            days_count = len(daily_history)
+            years_analyzed = days_count / 365.25 if days_count > 0 else 1
+
+            # Annualized metrics
+            annual_profit = total_profit / years_analyzed if years_analyzed > 0 else 0
+
             safe_session_state_update("pzu_market_metrics", {
-                "daily_history": sanitize_session_value(daily_history_dict)
+                "daily_history": sanitize_session_value(daily_history_dict),
+                "annual": {
+                    "total": annual_profit,  # Annual gross profit (consistent with FR format)
+                    "days_analyzed": days_count,
+                    "years_analyzed": years_analyzed
+                }
             })
     except Exception:
         pass  # Silently fail if session state update fails
