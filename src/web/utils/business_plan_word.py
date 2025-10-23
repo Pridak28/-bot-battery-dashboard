@@ -301,12 +301,19 @@ def generate_comprehensive_business_plan(
         add_bullet_point(doc, f"Annual ROI: {(pzu_net_profit / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
     else:
         # Provide conservative estimates when PZU data not available
-        # Conservative estimate: 1 cycle/day * 365 days * capacity * €15/MWh spread
-        estimated_pzu_revenue = capacity_mwh * 365 * 15  # €15/MWh spread, 1 cycle/day
+        # Use power_mw (not capacity_mwh) for energy arbitrage volume calculation
+        # Conservative: 2 cycles/day, 330 active days/year, €60/MWh spread, 85% efficiency
+        daily_cycles = 2
+        active_days = 330  # Excluding low-spread days
+        spread_eur_mwh = 60  # Conservative average spread
+        roundtrip_efficiency = 0.85
+
+        # Annual energy throughput: power_mw × hours/cycle × cycles × days × efficiency
+        estimated_pzu_revenue = power_mw * daily_cycles * active_days * spread_eur_mwh * roundtrip_efficiency
         estimated_pzu_ebitda = estimated_pzu_revenue - pzu_opex_annual
         estimated_pzu_net = estimated_pzu_ebitda - actual_pzu_debt_service
 
-        add_bullet_point(doc, f"Annual Gross Profit: €{estimated_pzu_revenue:,.0f} (estimated: €15/MWh spread, 1 cycle/day)")
+        add_bullet_point(doc, f"Annual Gross Profit: €{estimated_pzu_revenue:,.0f} (estimated: {daily_cycles} cycles/day, €{spread_eur_mwh}/MWh spread)")
         add_bullet_point(doc, f"Annual Operating Costs: €{pzu_opex_annual:,.0f}")
         add_bullet_point(doc, f"Annual Debt Service: €{actual_pzu_debt_service:,.0f} ({loan_term_years}-year annuity @ {interest_rate*100:.1f}%)")
         add_bullet_point(doc, f"Net Annual Profit: €{estimated_pzu_net:,.0f} (estimated)")
@@ -314,7 +321,9 @@ def generate_comprehensive_business_plan(
 
         add_formatted_paragraph(doc, '')
         add_formatted_paragraph(doc,
-            'Note: PZU figures are conservative estimates based on historical Romanian day-ahead market spreads. '
+            f'Note: PZU figures are conservative estimates based on historical Romanian day-ahead market spreads '
+            f'(€{spread_eur_mwh}/MWh average spread, {daily_cycles} cycles/day, {active_days} active trading days/year). '
+            f'Calculation uses {power_mw} MW power rating for daily energy throughput with {roundtrip_efficiency*100:.0f}% round-trip efficiency. '
             'Actual performance will be determined by real-time market conditions and trading strategy execution. '
             'Run PZU Horizons simulator for detailed historical analysis.',
             italic=True
