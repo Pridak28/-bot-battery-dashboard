@@ -187,13 +187,17 @@ def apply_excel_formatting(ws, title: str):
 
         # Set width with reasonable limits
         if col_idx == 1:
-            # First column (labels) - wider
-            adjusted_width = min(max(max_length + 2, 25), 50)
+            # First column (labels) - wider for better readability
+            adjusted_width = min(max(max_length + 3, 30), 55)
         else:
-            # Data columns
-            adjusted_width = min(max(max_length + 2, 12), 35)
+            # Data columns - consistent width for numbers
+            adjusted_width = min(max(max_length + 3, 15), 40)
 
         ws.column_dimensions[column_letter].width = adjusted_width
+
+    # Set row height for better spacing
+    for row_idx in range(1, ws.max_row + 1):
+        ws.row_dimensions[row_idx].height = 18 if row_idx > header_row else ws.row_dimensions[row_idx].height
 
 
 def create_transaction_summary(
