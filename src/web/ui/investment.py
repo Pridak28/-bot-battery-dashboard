@@ -916,66 +916,24 @@ def render_investment_financing_analysis(cfg: dict) -> None:
                 st.info("Run PZU Horizons to see data")
 
     # =========================================================================
-    # SCALE ALL EXPORTS FOR SINGLE 15 MWh PROJECT
-    # NOTE: User wants 15 MWh capacity, regardless of config
+    # USE ACTUAL PROJECT VALUES (NO SCALING!)
+    # User enters 15 MW power, investment is 15 MW × €250k = €3.75M
     # =========================================================================
     battery_cfg = cfg.get("battery", {})
 
-    # USER SPECIFIED: 15 MWh project
-    single_project_capacity = 15.0  # MWh - as requested
-    single_project_power = float(battery_cfg.get("power_mw", 20.0))  # Use config power rating
+    # Use actual config values
+    single_project_capacity = float(battery_cfg.get("capacity_mwh", 15.0))
+    single_project_power = float(battery_cfg.get("power_mw", 15.0))
 
-    # Scale investment based on capacity ratio
-    config_capacity = float(battery_cfg.get("capacity_mwh", 55.0))
-    capacity_ratio = single_project_capacity / config_capacity  # 15/55 = 0.273
+    # Use ACTUAL investment values from UI (NO scaling!)
+    single_project_investment = total_investment  # Full investment: 15 MW × €250k = €3.75M
+    single_project_equity = fr_equity  # Full equity (50%)
+    single_project_debt = fr_debt  # Full debt (50%)
 
-    single_project_investment = total_investment * capacity_ratio
-    single_project_equity = fr_equity * capacity_ratio
-    single_project_debt = fr_debt * capacity_ratio
-
-    # Scale FR/PZU metrics for single project based on capacity ratio
-    single_fr_metrics = None
-    if fr_metrics:
-        single_fr_metrics = {
-            "annual": {
-                "total": fr_metrics.get("annual", {}).get("total", 0) * capacity_ratio,
-                "capacity": fr_metrics.get("annual", {}).get("capacity", 0) * capacity_ratio,
-                "activation": fr_metrics.get("annual", {}).get("activation", 0) * capacity_ratio,
-                "energy_cost": fr_metrics.get("annual", {}).get("energy_cost", 0) * capacity_ratio,
-                "debt": fr_metrics.get("annual", {}).get("debt", 0) * capacity_ratio,
-                "net": fr_metrics.get("annual", {}).get("net", 0) * capacity_ratio,
-            },
-            "months": [
-                {
-                    "month": m.get("month"),
-                    "capacity_revenue_eur": m.get("capacity_revenue_eur", 0) * capacity_ratio,
-                    "activation_revenue_eur": m.get("activation_revenue_eur", 0) * capacity_ratio,
-                    "total_revenue_eur": m.get("total_revenue_eur", 0) * capacity_ratio,
-                    "energy_cost_eur": m.get("energy_cost_eur", 0) * capacity_ratio,
-                    "activation_energy_mwh": m.get("activation_energy_mwh", 0) * capacity_ratio,
-                }
-                for m in fr_metrics.get("months", [])
-            ] if "months" in fr_metrics else []
-        }
-
-    single_pzu_metrics = None
-    if pzu_metrics:
-        single_pzu_metrics = {
-            "annual": {
-                "total": pzu_metrics.get("annual", {}).get("total", 0) * capacity_ratio,
-                "debt": pzu_metrics.get("annual", {}).get("debt", 0) * capacity_ratio,
-                "net": pzu_metrics.get("annual", {}).get("net", 0) * capacity_ratio,
-            },
-            "daily_history": [
-                {
-                    "date": d.get("date"),
-                    "daily_profit_eur": d.get("daily_profit_eur", 0) * capacity_ratio,
-                    "daily_revenue_eur": d.get("daily_revenue_eur", 0) * capacity_ratio,
-                    "daily_cost_eur": d.get("daily_cost_eur", 0) * capacity_ratio,
-                }
-                for d in pzu_metrics.get("daily_history", [])
-            ] if "daily_history" in pzu_metrics else []
-        }
+    # Use ACTUAL FR/PZU metrics (NO scaling!)
+    # FR simulator already runs with 15 MW contracted, so values are correct
+    single_fr_metrics = fr_metrics
+    single_pzu_metrics = pzu_metrics
 
     # Add export functionality for banking/finance reports (SINGLE PROJECT)
     add_export_buttons(
@@ -988,8 +946,8 @@ def render_investment_financing_analysis(cfg: dict) -> None:
         debt_eur=single_project_debt,
         loan_term_years=loan_term_years,
         interest_rate=interest_rate,
-        fr_opex_annual=fr_operating_cost_annual * capacity_ratio,
-        pzu_opex_annual=pzu_operating_cost_annual * capacity_ratio,
+        fr_opex_annual=fr_operating_cost_annual,  # Use actual OPEX
+        pzu_opex_annual=pzu_operating_cost_annual,  # Use actual OPEX
         fr_years_analyzed=fr_years_count,
         pzu_years_analyzed=pzu_years_count,
     )
@@ -1005,8 +963,8 @@ def render_investment_financing_analysis(cfg: dict) -> None:
         interest_rate=interest_rate,
         fr_metrics=single_fr_metrics,
         pzu_metrics=single_pzu_metrics,
-        fr_opex_annual=fr_operating_cost_annual * capacity_ratio,
-        pzu_opex_annual=pzu_operating_cost_annual * capacity_ratio,
+        fr_opex_annual=fr_operating_cost_annual,  # Use actual OPEX
+        pzu_opex_annual=pzu_operating_cost_annual,  # Use actual OPEX
     )
 
     # Add comprehensive Word business plan (30-40 pages)
@@ -1021,6 +979,6 @@ def render_investment_financing_analysis(cfg: dict) -> None:
         interest_rate=interest_rate,
         fr_metrics=single_fr_metrics,
         pzu_metrics=single_pzu_metrics,
-        fr_opex_annual=fr_operating_cost_annual * capacity_ratio,
-        pzu_opex_annual=pzu_operating_cost_annual * capacity_ratio,
+        fr_opex_annual=fr_operating_cost_annual,  # Use actual OPEX
+        pzu_opex_annual=pzu_operating_cost_annual,  # Use actual OPEX
     )
