@@ -18,6 +18,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
+from src.web.utils.business_plan_translations import get_bp_text
+
 
 def add_page_break(doc: Document):
     """Add a page break"""
