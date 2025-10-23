@@ -300,15 +300,15 @@ def generate_comprehensive_business_plan(
         add_bullet_point(doc, f"Net Annual Profit: €{pzu_net_profit:,.0f}")
         add_bullet_point(doc, f"Annual ROI: {(pzu_net_profit / investment_eur * 100) if investment_eur > 0 else 0:.1f}%")
     else:
-        # Provide conservative estimates when PZU data not available
-        # Use power_mw (not capacity_mwh) for energy arbitrage volume calculation
-        # Conservative: 2 cycles/day, 330 active days/year, €60/MWh spread, 85% efficiency
-        daily_cycles = 2
-        active_days = 330  # Excluding low-spread days
-        spread_eur_mwh = 60  # Conservative average spread
-        roundtrip_efficiency = 0.85
+        # Provide realistic estimates when PZU data not available
+        # Use power_mw for energy arbitrage volume calculation
+        # Realistic: 1.8 cycles/day average, 320 active days/year, €100/MWh spread, 90% efficiency
+        daily_cycles = 1.8  # Average (some days 2, some days 1)
+        active_days = 320  # Days with profitable spreads (excluding weekends/holidays with low spreads)
+        spread_eur_mwh = 100  # Realistic average spread for profitable arbitrage in Romanian market
+        roundtrip_efficiency = 0.90  # Modern Li-ion battery systems
 
-        # Annual energy throughput: power_mw × hours/cycle × cycles × days × efficiency
+        # Annual energy throughput: power_mw × cycles × days × spread × efficiency
         estimated_pzu_revenue = power_mw * daily_cycles * active_days * spread_eur_mwh * roundtrip_efficiency
         estimated_pzu_ebitda = estimated_pzu_revenue - pzu_opex_annual
         estimated_pzu_net = estimated_pzu_ebitda - actual_pzu_debt_service
